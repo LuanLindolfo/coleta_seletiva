@@ -12,7 +12,7 @@ st.set_page_config(
 st.title("♻️ Coleta Seletiva")
 st.markdown(
     "Clique dentro da tela do jogo para focar o teclado: **ESPAÇO** inicia • "
-    "**Setas** ou **A / D** movem • **1 a 5** trocam a lixeira • **M** muta o som."
+    "**Setas** ou **A / D** movem • **1 a 5** trocam a lixeira • **P** pausa • **M** muta."
 )
 
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -138,6 +138,10 @@ html_jogo = f"""
     font-size: 12px;
     color: #9e9e9e;
   }}
+  .acoes {{
+    display: flex;
+    gap: 6px;
+  }}
   .btn-mini {{
     background: #232d26;
     color: #e8f5e9;
@@ -156,7 +160,8 @@ html_jogo = f"""
 <canvas id="game" width="480" height="360" tabindex="0"></canvas>
 <div class="barra-inferior">
   <span id="status-foco">Clique no jogo para focar o teclado</span>
-  <div>
+  <div class="acoes">
+    <button class="btn-mini" id="btn-pausar" type="button">Pausar</button>
     <button class="btn-mini" id="btn-reiniciar" type="button">Reiniciar</button>
     <button class="btn-mini" id="btn-mute" type="button">Som: Ligado</button>
   </div>
@@ -165,12 +170,13 @@ html_jogo = f"""
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const statusFoco = document.getElementById("status-foco");
+const btnPausar = document.getElementById("btn-pausar");
 const btnReiniciar = document.getElementById("btn-reiniciar");
 const btnMute = document.getElementById("btn-mute");
 
 function focarCanvas() {{
   canvas.focus();
-  statusFoco.textContent = "Teclado ativo (Espaço / Setas / 1-5)";
+  statusFoco.textContent = "Teclado ativo (Espaço / Setas / 1-5 / P)";
 }}
 
 canvas.addEventListener("click", focarCanvas);
@@ -180,6 +186,22 @@ canvas.addEventListener("blur", () => {{
 
 const W = 480, H = 360;
 const URIS = {assets_uri};
+const STORAGE_KEY = "coleta_seletiva_recorde_v1";
+
+function lerRecorde() {{
+  try {{
+    const val = parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
+    return Number.isNaN(val) ? 0 : Math.max(0, val);
+  }} catch (e) {{
+    return 0;
+  }}
+}}
+
+function salvarRecorde(novoRecorde) {{
+  try {{
+    localStorage.setItem(STORAGE_KEY, String(novoRecorde));
+  }} catch (e) {{}}
+}}
 
 function loadImg(src) {{
   const img = new Image();
@@ -256,7 +278,11 @@ function roundRect(x, y, w, h, r) {{
 }}
 
 let estado = "instrucoes";
+let pausado = false;
+let pausadoEm = 0;
+
 let pontos = 0;
+let recorde = lerRecorde();
 let vidas = 5;
 let velocidade = 3.0;
 let ultimoTipo = 1;
@@ -279,9 +305,46 @@ let encerrarEm = 0;
 
 const teclas = {{}};
 
+function atualizarBotaoPausar() {{
+  btnPausar.textContent = pausado ? "Continuar" : "Pausar";
+}}
+
+function alternarPausa() {{
+  if (estado !== "jogo") return;
+  const agora = performance.now();
+  if (!pausado) {{
+    pausado = true;
+    pausadoEm = agora;
+  }} else {{
+    const delta = agora - pausadoEm;
+    ultimoAumentoVel += delta;
+    proximoSpawn += delta;
+    if (dicaVisivel) dicaAte += delta;
+    if (flashErroAte > 0) flashErroAte += delta;
+    for (const fb of feedbacks) {{
+      fb.criadoEm += delta;
+    }}
+    pausado = false;
+  }}
+  atualizarBotaoPausar();
+  focarCanvas();
+}}
+
+btnPausar.addEventListener("click", alternarPausa);
+
+function registrarPonto() {{
+  pontos += 1;
+  if (pontos > recorde) {{
+    recorde = pontos;
+    salvarRecorde(recorde);
+  }}
+}}
+
 function iniciarPartida() {{
   const agora = performance.now();
   estado = "jogo";
+  pausado = false;
+  atualizarBotaoPausar();
   pontos = 0;
   vidas = 5;
   velocidade = 3.0;
@@ -312,9 +375,13 @@ window.addEventListener("keydown", (e) => {{
     alternarMute();
     return;
   }}
+  if (e.key && e.key.toLowerCase() === "p") {{
+    alternarPausa();
+    return;
+  }}
   if (estado === "instrucoes" && e.code === "Space") {{
     iniciarPartida();
-  }} else if (estado === "jogo") {{
+  }} else if (estado === "jogo" && !pausado) {{
     if (e.key === "1") lixeiraFantasia = 1;
     if (e.key === "2") lixeiraFantasia = 2;
     if (e.key === "3") lixeiraFantasia = 3;
@@ -357,7 +424,9 @@ function rectsColidem(a, b) {{
 }}
 
 function loop(agora) {{
-  if (estado === "jogo") {{
+  const tempoRef = pausado ? pausadoEm : agora;
+
+  if (estado === "jogo" && !pausado) {{
     if (agora - ultimoAumentoVel >= 6000) {{
       velocidade += 0.4;
       ultimoAumentoVel = agora;
@@ -397,7 +466,7 @@ function loop(agora) {{
 
       if (rectsColidem(rectItem, rectLixeira)) {{
         if (lixeiraFantasia === c.tipo) {{
-          pontos += 1;
+          registrarPonto();
           adicionarFeedback(lx + lw / 2, ly - 6, "+1", "#69f0ae");
           playSound(sons.acerto);
         }} else {{
@@ -421,6 +490,8 @@ function loop(agora) {{
 
     if (vidas < 1) {{
       estado = "fim";
+      pausado = false;
+      atualizarBotaoPausar();
       lixeiraVisivel = false;
       dicaVisivel = false;
       clones = [];
@@ -428,6 +499,8 @@ function loop(agora) {{
       encerrarEm = agora + 2500;
     }} else if (pontos > 19) {{
       estado = "vitoria";
+      pausado = false;
+      atualizarBotaoPausar();
       lixeiraVisivel = false;
       dicaVisivel = false;
       clones = [];
@@ -442,8 +515,8 @@ function loop(agora) {{
 
   // Renderização
   ctx.save();
-  if (agora < flashErroAte) {{
-    const tremor = Math.sin(agora * 0.08) * 3;
+  if (!pausado && tempoRef < flashErroAte) {{
+    const tremor = Math.sin(tempoRef * 0.08) * 3;
     ctx.translate(tremor, 0);
   }}
 
@@ -465,12 +538,22 @@ function loop(agora) {{
     ctx.textAlign = "left";
   }}
 
-  if (estado === "instrucoes" && imagemPronta(imgs.botao)) {{
-    const escala = Math.floor(agora / 300) % 2 === 1 ? 1.1 : 1.0;
-    const bw = imgs.botao.naturalWidth * escala;
-    const bh = imgs.botao.naturalHeight * escala;
-    const [bx, by] = scratchToCanvas(36, 28, bw, bh, [147.5 * escala, -121.4 * escala]);
-    ctx.drawImage(imgs.botao, bx, by, bw, bh);
+  if (estado === "instrucoes") {{
+    if (imagemPronta(imgs.botao)) {{
+      const escala = Math.floor(agora / 300) % 2 === 1 ? 1.1 : 1.0;
+      const bw = imgs.botao.naturalWidth * escala;
+      const bh = imgs.botao.naturalHeight * escala;
+      const [bx, by] = scratchToCanvas(36, 28, bw, bh, [147.5 * escala, -121.4 * escala]);
+      ctx.drawImage(imgs.botao, bx, by, bw, bh);
+    }}
+    if (recorde > 0) {{
+      ctx.fillStyle = "rgba(20, 28, 22, 0.85)";
+      roundRect(W - 142, 8, 134, 26, 6);
+      ctx.fill();
+      ctx.fillStyle = "#ffe082";
+      ctx.font = "bold 13px Arial";
+      ctx.fillText(`Recorde: ${{recorde}} / 20`, W - 134, 26);
+    }}
   }} else if (estado === "jogo") {{
     if (lixeiraVisivel) {{
       const imgL = imgs.lixeira[lixeiraFantasia - 1];
@@ -510,7 +593,7 @@ function loop(agora) {{
 
     const proxFeedbacks = [];
     for (const fb of feedbacks) {{
-      const elapsed = agora - fb.criadoEm;
+      const elapsed = tempoRef - fb.criadoEm;
       if (elapsed < 750) {{
         const yAtual = fb.y - (elapsed * 0.04);
         const alpha = 1 - (elapsed / 750);
@@ -526,7 +609,7 @@ function loop(agora) {{
     }}
     feedbacks = proxFeedbacks;
 
-    if (agora < flashErroAte) {{
+    if (!pausado && tempoRef < flashErroAte) {{
       ctx.save();
       ctx.strokeStyle = "rgba(255, 60, 60, 0.85)";
       ctx.lineWidth = 6;
@@ -539,11 +622,30 @@ function loop(agora) {{
     ctx.fill();
     roundRect(8, 39, 136, 26, 6);
     ctx.fill();
+    roundRect(W - 142, 8, 134, 26, 6);
+    ctx.fill();
 
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 14px Arial";
     ctx.fillText(`Pontos: ${{pontos}} / 20`, 16, 26);
     ctx.fillText(`Vidas: ${{vidas}}`, 16, 57);
+
+    ctx.fillStyle = "#ffe082";
+    ctx.font = "bold 13px Arial";
+    ctx.fillText(`Recorde: ${{recorde}}`, W - 134, 26);
+
+    if (pausado) {{
+      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 26px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("PAUSADO", W / 2, H / 2 - 6);
+      ctx.font = "14px Arial";
+      ctx.fillStyle = "#cfd8dc";
+      ctx.fillText("Aperte P ou clique em Continuar", W / 2, H / 2 + 22);
+      ctx.textAlign = "left";
+    }}
   }}
 
   ctx.restore();
