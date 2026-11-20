@@ -5,15 +5,20 @@ import streamlit as st
 
 st.set_page_config(page_title="Coleta Seletiva - Streamlit", layout="centered")
 st.title("♻️ Coleta Seletiva (Modo 1: HTML5 Canvas no Streamlit)")
-st.caption("Use ESPAÇO para iniciar, Setas ou A/D para mover e teclas 1 a 5 para trocar a lixeira.")
+st.caption("Usa ESPAÇO para iniciar, Setas ou A/D para mover e teclas 1 a 5 para trocar a lixeira.")
 
 PASTA_RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_ASSETS = os.path.join(PASTA_RAIZ, "dependencias")
 
+arquivos_em_falta = []
+arquivos_carregados = 0
+
 
 def asset_to_data_uri(nome_arquivo):
+    global arquivos_carregados
     caminho = os.path.join(PASTA_ASSETS, nome_arquivo)
     if not os.path.exists(caminho):
+        arquivos_em_falta.append(nome_arquivo)
         return ""
     mime, _ = mimetypes.guess_type(caminho)
     if nome_arquivo.lower().endswith(".svg"):
@@ -25,10 +30,10 @@ def asset_to_data_uri(nome_arquivo):
 
     with open(caminho, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("utf-8")
+    arquivos_carregados += 1
     return f"data:{mime};base64,{b64}"
 
 
-# Caso o cenário 'jogo' dentro de 'dependencias' seja .jpg em vez de .png, tenta ambos automaticamente
 cenario_jogo_nome = (
     "693507866d39d7257377845b34fa7426.png"
     if os.path.exists(os.path.join(PASTA_ASSETS, "693507866d39d7257377845b34fa7426.png"))
@@ -73,6 +78,14 @@ assets_uri = {
     "som_vitoria": asset_to_data_uri("b8251bb11c300af3582aba1239082d41.wav"),
 }
 
+if not os.path.isdir(PASTA_ASSETS):
+    st.error(f"Pasta 'dependencias' não encontrada em: {PASTA_ASSETS}")
+elif arquivos_em_falta:
+    st.warning(
+        f"Foram carregados {arquivos_carregados} ficheiros, mas {len(arquivos_em_falta)} não foram encontrados em 'dependencias/': "
+        + ", ".join(arquivos_em_falta)
+    )
+
 html_jogo = f"""
 <!DOCTYPE html>
 <html>
@@ -90,7 +103,7 @@ html_jogo = f"""
   canvas {{
     border: 2px solid #444;
     border-radius: 6px;
-    background: #000;
+    background: #1b2a1e;
     outline: none;
   }}
 </style>
@@ -151,6 +164,10 @@ function scratchToCanvas(x, y, w, h, rotCenter = null) {{
     return [W / 2 + x - rotCenter[0], H / 2 - y - rotCenter[1]];
   }}
   return [W / 2 + x - w / 2, H / 2 - y - h / 2];
+}}
+
+function imagemPronta(img) {{
+  return Boolean(img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0);
 }}
 
 let estado = "instrucoes";
@@ -252,8 +269,8 @@ function loop(agora) {{
     }}
 
     const imgL = imgs.lixeira[lixeiraFantasia - 1];
-    const lw = imgL.width || 80;
-    const lh = imgL.height || 84;
+    const lw = (imgL && imgL.naturalWidth) || 80;
+    const lh = (imgL && imgL.naturalHeight) || 84;
     const [lx, ly] = scratchToCanvas(lixeiraX, lixeiraY, lw, lh, [40, 42]);
     const rectLixeira = {{ x: lx, y: ly, w: lw, h: lh }};
 
@@ -261,8 +278,8 @@ function loop(agora) {{
     for (const c of clones) {{
       c.y -= velocidade;
       const imgC = imgs.lixo[c.item - 1];
-      const cw = imgC.width || 50;
-      const ch = imgC.height || 50;
+      const cw = (imgC && imgC.naturalWidth) || 50;
+      const ch = (imgC && imgC.naturalHeight) || 50;
       const [cx, cy] = scratchToCanvas(c.x, c.y, cw, ch);
       const rectItem = {{ x: cx, y: cy, w: cw, h: ch }};
 
@@ -313,40 +330,64 @@ function loop(agora) {{
 
   // Renderização
   ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#1b2a1e";
+  ctx.fillRect(0, 0, W, H);
+
   const bgAtual = imgs.bg[estado];
-  if (bgAtual && bgAtual.complete) {{
+  if (imagemPronta(bgAtual)) {{
     ctx.drawImage(bgAtual, 0, 0, W, H);
+  }} else if (estado === "instrucoes") {{
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 20px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("COLETA SELETIVA", W / 2, 110);
+    ctx.font = "15px Arial";
+    ctx.fillText("Clica aqui e prime ESPAÇO para começar", W / 2, 155);
+    ctx.fillText("Setas / A-D: mover | 1 a 5: escolher lixeira", W / 2, 185);
+    ctx.textAlign = "left";
   }}
 
-  if (estado === "instrucoes" && imgs.botao.complete) {{
+  if (estado === "instrucoes" && imagemPronta(imgs.botao)) {{
     const escala = Math.floor(agora / 300) % 2 === 1 ? 1.1 : 1.0;
-    const bw = (imgs.botao.width || 220) * escala;
-    const bh = (imgs.botao.height || 60) * escala;
+    const bw = imgs.botao.naturalWidth * escala;
+    const bh = imgs.botao.naturalHeight * escala;
     const [bx, by] = scratchToCanvas(36, 28, bw, bh, [147.5 * escala, -121.4 * escala]);
     ctx.drawImage(imgs.botao, bx, by, bw, bh);
   }} else if (estado === "jogo") {{
     if (lixeiraVisivel) {{
       const imgL = imgs.lixeira[lixeiraFantasia - 1];
-      const lw = imgL.width || 80;
-      const lh = imgL.height || 84;
+      const lw = (imgL && imgL.naturalWidth) || 80;
+      const lh = (imgL && imgL.naturalHeight) || 84;
       const [lx, ly] = scratchToCanvas(lixeiraX, lixeiraY, lw, lh, [40, 42]);
-      ctx.drawImage(imgL, lx, ly, lw, lh);
+      if (imagemPronta(imgL)) {{
+        ctx.drawImage(imgL, lx, ly, lw, lh);
+      }} else {{
+        ctx.fillStyle = "#2e7d32";
+        ctx.fillRect(lx, ly, lw, lh);
+      }}
     }}
 
     for (const c of clones) {{
       const imgC = imgs.lixo[c.item - 1];
-      const cw = imgC.width || 50;
-      const ch = imgC.height || 50;
+      const cw = (imgC && imgC.naturalWidth) || 50;
+      const ch = (imgC && imgC.naturalHeight) || 50;
       const [cx, cy] = scratchToCanvas(c.x, c.y, cw, ch);
-      ctx.drawImage(imgC, cx, cy, cw, ch);
+      if (imagemPronta(imgC)) {{
+        ctx.drawImage(imgC, cx, cy, cw, ch);
+      }} else {{
+        ctx.fillStyle = "#fbc02d";
+        ctx.fillRect(cx, cy, cw, ch);
+      }}
     }}
 
     if (dicaVisivel) {{
       const imgD = imgs.dica[dicaFantasia - 1];
-      const dw = imgD.width || 440;
-      const dh = imgD.height || 60;
+      const dw = (imgD && imgD.naturalWidth) || 440;
+      const dh = (imgD && imgD.naturalHeight) || 60;
       const [dx, dy] = scratchToCanvas(0, 95, dw, dh, [220, 30]);
-      ctx.drawImage(imgD, dx, dy, dw, dh);
+      if (imagemPronta(imgD)) {{
+        ctx.drawImage(imgD, dx, dy, dw, dh);
+      }}
     }}
 
     ctx.fillStyle = "rgba(30, 30, 30, 0.85)";
