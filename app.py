@@ -8,7 +8,8 @@ st.set_page_config(page_title="Coleta Seletiva - Streamlit", layout="centered")
 st.title("♻️ Coleta Seletiva (Modo 1: HTML5 Canvas no Streamlit)")
 st.caption("Use ESPAÇO para iniciar, Setas ou A/D para mover e teclas 1 a 5 para trocar a lixeira.")
 
-PASTA_ASSETS = os.path.dirname(os.path.abspath(__file__))
+PASTA_RAIZ = os.path.dirname(os.path.abspath(__file__))
+PASTA_ASSETS = os.path.join(PASTA_RAIZ, "dependencias")
 
 def asset_to_data_uri(nome_arquivo):
     caminho = os.path.join(PASTA_ASSETS, nome_arquivo)
@@ -26,7 +27,7 @@ def asset_to_data_uri(nome_arquivo):
         b64 = base64.b64encode(f.read()).decode("utf-8")
     return f"data:{mime};base64,{b64}"
 
-# Caso o cenário 'jogo' na pasta seja .jpg em vez de .png, tenta ambos automaticamente
+# Caso o cenário 'jogo' dentro de 'dependencias' seja .jpg em vez de .png, tenta ambos automaticamente
 cenario_jogo_nome = (
     "693507866d39d7257377845b34fa7426.png"
     if os.path.exists(os.path.join(PASTA_ASSETS, "693507866d39d7257377845b34fa7426.png"))
