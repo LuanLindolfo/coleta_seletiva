@@ -359,6 +359,7 @@ with col_jogo:
         align-items: center;
         font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
         touch-action: manipulation;
+        overflow: hidden;
       }
       .game-wrapper {
         position: relative;
@@ -1024,7 +1025,7 @@ with col_jogo:
     )
 
     if hasattr(st, "iframe"):
-        st.iframe(html_jogo, height=495, scrolling=False)
+        st.iframe(html_jogo, height=495)
     else:
         import streamlit.components.v1 as components
         components.html(html_jogo, height=495, scrolling=False)
