@@ -3,6 +3,8 @@ import hashlib
 import json
 import mimetypes
 import os
+import urllib.request
+import urllib.error
 from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
@@ -15,10 +17,14 @@ st.set_page_config(
 )
 
 CHAVE_SECRETA = "coleta_seletiva_anti_fraude_2026"
-
 PASTA_RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_ASSETS = os.path.join(PASTA_RAIZ, "dependencias")
-ARQUIVO_RANKING = os.path.join(PASTA_RAIZ, "ranking.json")
+ARQUIVO_RANKING_LOCAL = os.path.join(PASTA_RAIZ, "ranking.json")
+
+# Configurações do GitHub via st.secrets (opcional no local, obrigatório no Streamlit Cloud)
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
+GITHUB_FILE_PATH = "ranking.json"
 
 
 def gerar_assinatura(nome: str, pontos: int, partida_id: str) -> str:
@@ -26,11 +32,77 @@ def gerar_assinatura(nome: str, pontos: int, partida_id: str) -> str:
     return hashlib.sha256(bruto.encode("utf-8")).hexdigest()[:16]
 
 
+def ler_ranking_github():
+    """Lê o ranking.json diretamente da API do GitHub (retorna lista e sha do arquivo)."""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return None, None
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            conteudo_decodificado = base64.b64decode(payload["content"]).decode("utf-8")
+            dados = json.loads(conteudo_decodificado)
+            return sorted(dados, key=lambda x: (-x["pontos"], x["data"])), payload["sha"]
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return [], None
+        return None, None
+    except Exception:
+        return None, None
+
+
+def gravar_ranking_github(novo_ranking, sha_atual):
+    """Atualiza o ranking.json no repositório GitHub via API."""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return False
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+    conteudo_str = json.dumps(novo_ranking, ensure_ascii=False, indent=2)
+    conteudo_b64 = base64.b64encode(conteudo_str.encode("utf-8")).decode("utf-8")
+
+    body = {
+        "message": "chore: atualiza pódio Coleta Seletiva",
+        "content": conteudo_b64,
+    }
+    if sha_atual:
+        body["sha"] = sha_atual
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        method="PUT",
+        headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return resp.status in (200, 201)
+    except Exception:
+        return False
+
+
 def carregar_ranking():
-    if not os.path.exists(ARQUIVO_RANKING):
+    dados_gh, _ = ler_ranking_github()
+    if dados_gh is not None:
+        return dados_gh
+
+    if not os.path.exists(ARQUIVO_RANKING_LOCAL):
         return []
     try:
-        with open(ARQUIVO_RANKING, "r", encoding="utf-8") as f:
+        with open(ARQUIVO_RANKING_LOCAL, "r", encoding="utf-8") as f:
             dados = json.load(f)
             return sorted(dados, key=lambda x: (-x["pontos"], x["data"]))
     except Exception:
@@ -40,7 +112,9 @@ def carregar_ranking():
 def salvar_no_ranking(nome: str, pontos: int, partida_id: str):
     nome_limpo = (nome or "Jogador").strip()[:20] or "Jogador"
     pontos_int = max(0, min(20, int(pontos)))
-    ranking = carregar_ranking()
+
+    dados_gh, sha_gh = ler_ranking_github()
+    ranking = dados_gh if dados_gh is not None else carregar_ranking()
 
     if any(item.get("partida_id") == partida_id for item in ranking):
         return False
@@ -54,12 +128,22 @@ def salvar_no_ranking(nome: str, pontos: int, partida_id: str):
         }
     )
     ranking = sorted(ranking, key=lambda x: (-x["pontos"], x["data"]))[:15]
-    with open(ARQUIVO_RANKING, "w", encoding="utf-8") as f:
-        json.dump(ranking, f, ensure_ascii=False, indent=2)
-    return True
+
+    # Tenta salvar no GitHub; se não configurado, salva localmente
+    if dados_gh is not None:
+        salvou = gravar_ranking_github(ranking, sha_gh)
+        if salvou:
+            return True
+
+    try:
+        with open(ARQUIVO_RANKING_LOCAL, "w", encoding="utf-8") as f:
+            json.dump(ranking, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
 
 
-# --- CAPTURA AUTOMÁTICA DA PONTUAÇÃO ENVIADA PELO JOGO ---
+# --- CAPTURA DA PONTUAÇÃO ENVIADA PELO JOGO ---
 params = st.query_params
 if "p_pts" in params and "p_nome" in params and "p_id" in params and "p_sig" in params:
     try:
@@ -75,8 +159,10 @@ if "p_pts" in params and "p_nome" in params and "p_id" in params and "p_sig" in 
                 st.session_state["ultimo_registro"] = (
                     f"🏆 Pontuação de **{p_nome}** ({p_pts} pts) salva no pódio!"
                 )
-    except Exception:
-        pass
+        else:
+            st.session_state["erro_registro"] = "⚠️ Assinatura inválida. Pontuação não registrada."
+    except Exception as e:
+        st.session_state["erro_registro"] = f"⚠️ Erro ao salvar: {e}"
     finally:
         st.query_params.clear()
         st.rerun()
@@ -145,6 +231,8 @@ st.markdown(
 
 if "ultimo_registro" in st.session_state:
     st.success(st.session_state.pop("ultimo_registro"))
+if "erro_registro" in st.session_state:
+    st.error(st.session_state.pop("erro_registro"))
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.markdown('<div class="bin-card" style="background:#1565c0;">1 · PAPEL</div>', unsafe_allow_html=True)
@@ -266,6 +354,7 @@ with col_jogo:
         touch-action: manipulation;
       }
       .game-wrapper {
+        position: relative;
         width: 100%;
         max-width: 520px;
         display: flex;
@@ -283,6 +372,30 @@ with col_jogo:
         outline: none;
         touch-action: none;
         display: block;
+      }
+      /* Botão-link target="_top" que o navegador nunca bloqueia */
+      #link-salvar-podio {
+        display: none;
+        position: absolute;
+        bottom: 112px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: linear-gradient(135deg, #ffd54f, #ffb300);
+        color: #1b1b1b;
+        font-weight: 800;
+        font-size: 14px;
+        padding: 12px 20px;
+        border-radius: 12px;
+        text-decoration: none;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+        border: 2px solid #ffffff;
+        z-index: 20;
+        white-space: nowrap;
+        animation: pulsar 0.9s infinite alternate;
+      }
+      @keyframes pulsar {
+        from { transform: translateX(-50%) scale(1); }
+        to { transform: translateX(-50%) scale(1.06); }
       }
       .lixeiras-touch {
         display: grid;
@@ -352,6 +465,8 @@ with col_jogo:
     <div class="game-wrapper">
       <canvas id="game" width="480" height="360" tabindex="0"></canvas>
 
+      <a id="link-salvar-podio" target="_top" href="#">🏆 Registrar no Pódio</a>
+
       <div class="lixeiras-touch">
         <button type="button" class="btn-lixeira b1 ativa" data-tipo="1">1·Papel</button>
         <button type="button" class="btn-lixeira b2" data-tipo="2">2·Plást.</button>
@@ -378,6 +493,7 @@ with col_jogo:
     const btnIniciarTop = document.getElementById("btn-iniciar-top");
     const btnMute = document.getElementById("btn-mute");
     const botoesLixeira = document.querySelectorAll(".btn-lixeira");
+    const linkSalvarPodio = document.getElementById("link-salvar-podio");
 
     const W = 480, H = 360;
     const URIS = __ASSETS_URI__;
@@ -406,33 +522,20 @@ with col_jogo:
       } catch (e) {}
     }
 
-    function enviarPontuacaoAutomatica(ptsFinal) {
+    function prepararLinkRegistro(ptsFinal) {
       const pts = Math.max(0, Math.min(20, ptsFinal));
       const sig = ASSINATURAS[String(pts)] || "";
 
-      // Descobre a URL da página principal (funciona tanto local quanto no Streamlit Cloud cross-origin)
-      let baseUrl = "";
-      try {
-        baseUrl = window.parent.location.href;
-      } catch (e) {
-        baseUrl = document.referrer || window.location.href;
-      }
+      const baseUrl = (document.referrer || window.location.href).split("?")[0];
+      const destino = new URL(baseUrl);
+      destino.searchParams.set("p_nome", NOME_JOGADOR);
+      destino.searchParams.set("p_pts", String(pts));
+      destino.searchParams.set("p_id", PARTIDA_ID);
+      destino.searchParams.set("p_sig", sig);
 
-      try {
-        const destino = new URL(baseUrl);
-        destino.searchParams.set("p_nome", NOME_JOGADOR);
-        destino.searchParams.set("p_pts", String(pts));
-        destino.searchParams.set("p_id", PARTIDA_ID);
-        destino.searchParams.set("p_sig", sig);
-        window.top.location.assign(destino.toString());
-      } catch (e) {
-        const qs =
-          "?p_nome=" + encodeURIComponent(NOME_JOGADOR) +
-          "&p_pts=" + encodeURIComponent(String(pts)) +
-          "&p_id=" + encodeURIComponent(PARTIDA_ID) +
-          "&p_sig=" + encodeURIComponent(sig);
-        window.top.location.assign(qs);
-      }
+      linkSalvarPodio.href = destino.toString();
+      linkSalvarPodio.textContent = "🏆 Salvar " + pts + " pts no Pódio!";
+      linkSalvarPodio.style.display = "block";
     }
 
     function loadImg(src) {
@@ -506,12 +609,11 @@ with col_jogo:
     let estado = "instrucoes";
     let pausado = false;
     let pausadoEm = 0;
-    let pontuacaoEnviada = false;
 
     let pontos = 0;
     let recorde = lerRecorde();
     let vidas = 5;
-    let velocidade = 2.1; // Velocidade inicial de queda reduzida
+    let velocidade = 2.1;
     let ultimoTipo = 1;
 
     let lixeiraX = 0;
@@ -528,7 +630,6 @@ with col_jogo:
     let flashErroAte = 0;
     let proximoSpawn = 0;
     let ultimoAumentoVel = 0;
-    let encerrarEm = 0;
 
     const teclas = {};
 
@@ -617,11 +718,11 @@ with col_jogo:
       const agora = performance.now();
       estado = "jogo";
       pausado = false;
-      pontuacaoEnviada = false;
+      linkSalvarPodio.style.display = "none";
       atualizarBotaoPausar();
       pontos = 0;
       vidas = 5;
-      velocidade = 2.1; // Velocidade inicial mais suave
+      velocidade = 2.1;
       ultimoTipo = 1;
       lixeiraX = 0;
       lixeiraY = -135;
@@ -692,13 +793,11 @@ with col_jogo:
       const tempoRef = pausado ? pausadoEm : agora;
 
       if (estado === "jogo" && !pausado) {
-        // Aumenta a velocidade mais devagar (a cada 7s, +0.25)
         if (agora - ultimoAumentoVel >= 7000) {
           velocidade += 0.25;
           ultimoAumentoVel = agora;
         }
 
-        // Movimento da lixeira no teclado mais suave (7.5 em vez de 12)
         if (teclas["ArrowLeft"] || teclas["KeyA"]) lixeiraX -= 7.5;
         if (teclas["ArrowRight"] || teclas["KeyD"]) lixeiraX += 7.5;
         if (lixeiraX > 205) lixeiraX = 205;
@@ -761,7 +860,7 @@ with col_jogo:
           dicaVisivel = false;
           clones = [];
           playSound(sons.fim);
-          encerrarEm = agora + 1800;
+          prepararLinkRegistro(pontos);
         } else if (pontos > 19) {
           estado = "vitoria";
           pausado = false;
@@ -770,12 +869,7 @@ with col_jogo:
           dicaVisivel = false;
           clones = [];
           playSound(sons.vitoria);
-          encerrarEm = agora + 1800;
-        }
-      } else if (estado === "fim" || estado === "vitoria") {
-        if (agora >= encerrarEm && !pontuacaoEnviada) {
-          pontuacaoEnviada = true;
-          enviarPontuacaoAutomatica(pontos);
+          prepararLinkRegistro(pontos);
         }
       }
 
@@ -901,15 +995,6 @@ with col_jogo:
           ctx.fillText("Toque em Continuar ou aperte P", W / 2, H / 2 + 22);
           ctx.textAlign = "left";
         }
-      } else if (estado === "fim" || estado === "vitoria") {
-        ctx.fillStyle = "rgba(15, 25, 18, 0.9)";
-        roundRect(W / 2 - 155, H - 44, 310, 32, 8);
-        ctx.fill();
-        ctx.fillStyle = "#a5d6a7";
-        ctx.font = "bold 13px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("Registrando " + pontos + " pts no pódio...", W / 2, H - 23);
-        ctx.textAlign = "left";
       }
 
       ctx.restore();
@@ -936,7 +1021,10 @@ with col_jogo:
 with col_ranking:
     st.markdown('<div class="ranking-card">', unsafe_allow_html=True)
     st.subheader("🏆 Pódio Oficial")
-    st.caption("Atualizado automaticamente ao final de cada partida.")
+    if GITHUB_TOKEN and GITHUB_REPO:
+        st.caption("Sincronizado em tempo real com o GitHub.")
+    else:
+        st.caption("Configure GITHUB_TOKEN e GITHUB_REPO nos Secrets para persistir na nuvem.")
 
     ranking_atual = carregar_ranking()
 
