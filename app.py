@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import mimetypes
 import os
@@ -12,6 +13,70 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# Chave interna para validar que a pontuação veio realmente do jogo
+CHAVE_SECRETA = "coleta_seletiva_anti_fraude_2026"
+
+PASTA_RAIZ = os.path.dirname(os.path.abspath(__file__))
+PASTA_ASSETS = os.path.join(PASTA_RAIZ, "dependencias")
+ARQUIVO_RANKING = os.path.join(PASTA_RAIZ, "ranking.json")
+
+
+def gerar_assinatura(nome: str, pontos: int, partida_id: str) -> str:
+    bruto = f"{nome}|{pontos}|{partida_id}|{CHAVE_SECRETA}"
+    return hashlib.sha256(bruto.encode("utf-8")).hexdigest()[:16]
+
+
+def carregar_ranking():
+    if not os.path.exists(ARQUIVO_RANKING):
+        return []
+    try:
+        with open(ARQUIVO_RANKING, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+            return sorted(dados, key=lambda x: (-x["pontos"], x["data"]))
+    except Exception:
+        return []
+
+
+def salvar_no_ranking(nome: str, pontos: int, partida_id: str):
+    nome_limpo = (nome or "Jogador").strip()[:20] or "Jogador"
+    pontos_int = max(0, min(20, int(pontos)))
+    ranking = carregar_ranking()
+
+    # Evita duplicar a mesma partida caso a página recarregue
+    if any(item.get("partida_id") == partida_id for item in ranking):
+        return
+
+    ranking.append(
+        {
+            "nome": nome_limpo,
+            "pontos": pontos_int,
+            "data": datetime.now().strftime("%d/%m %H:%M"),
+            "partida_id": partida_id,
+        }
+    )
+    ranking = sorted(ranking, key=lambda x: (-x["pontos"], x["data"]))[:15]
+    with open(ARQUIVO_RANKING, "w", encoding="utf-8") as f:
+        json.dump(ranking, f, ensure_ascii=False, indent=2)
+
+
+# --- CAPTURA AUTOMÁTICA DA PONTUAÇÃO ENVIADA PELO JOGO ---
+params = st.query_params
+if "p_pts" in params and "p_nome" in params and "p_id" in params and "p_sig" in params:
+    try:
+        p_nome = str(params["p_nome"])
+        p_pts = int(params["p_pts"])
+        p_id = str(params["p_id"])
+        p_sig = str(params["p_sig"])
+
+        if gerar_assinatura(p_nome, p_pts, p_id) == p_sig:
+            salvar_no_ranking(p_nome, p_pts, p_id)
+            st.session_state["ultimo_registro"] = f"✅ Pontuação de **{p_nome}** ({p_pts} pts) registrada no pódio!"
+    except Exception:
+        pass
+    finally:
+        st.query_params.clear()
+        st.rerun()
 
 # --- CSS PERSONALIZADO ---
 st.markdown(
@@ -62,37 +127,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-PASTA_RAIZ = os.path.dirname(os.path.abspath(__file__))
-PASTA_ASSETS = os.path.join(PASTA_RAIZ, "dependencias")
-ARQUIVO_RANKING = os.path.join(PASTA_RAIZ, "ranking.json")
-
-
-def carregar_ranking():
-    if not os.path.exists(ARQUIVO_RANKING):
-        return []
-    try:
-        with open(ARQUIVO_RANKING, "r", encoding="utf-8") as f:
-            dados = json.load(f)
-            return sorted(dados, key=lambda x: (-x["pontos"], x["data"]))
-    except Exception:
-        return []
-
-
-def salvar_no_ranking(nome, pontos):
-    nome_limpo = (nome or "Jogador").strip()[:20] or "Jogador"
-    ranking = carregar_ranking()
-    ranking.append(
-        {
-            "nome": nome_limpo,
-            "pontos": int(pontos),
-            "data": datetime.now().strftime("%d/%m %H:%M"),
-        }
-    )
-    ranking = sorted(ranking, key=lambda x: (-x["pontos"], x["data"]))[:15]
-    with open(ARQUIVO_RANKING, "w", encoding="utf-8") as f:
-        json.dump(ranking, f, ensure_ascii=False, indent=2)
-
-
 st.markdown(
     """
     <div class="header-box">
@@ -102,6 +136,9 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+if "ultimo_registro" in st.session_state:
+    st.toast(st.session_state.pop("ultimo_registro"), icon="🏆")
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.markdown('<div class="bin-card" style="background:#1565c0;">1 · PAPEL</div>', unsafe_allow_html=True)
@@ -187,11 +224,19 @@ col_jogo, col_ranking = st.columns([1.45, 1], gap="large")
 
 with col_jogo:
     nome_jogador = st.text_input(
-        "👤 Seu nome para o Ranking:",
+        "👤 Seu nome antes de começar a jogar:",
         value="Jogador",
         max_chars=20,
         placeholder="Digite seu apelido...",
     )
+
+    # Pré-gera assinaturas válidas para todas as pontuações possíveis (0 a 20) desta sessão
+    partida_id_atual = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    nome_seguro = (nome_jogador or "Jogador").strip()[:20] or "Jogador"
+    assinaturas_validas = {
+        str(pts): gerar_assinatura(nome_seguro, pts, partida_id_atual)
+        for pts in range(0, 21)
+    }
 
     html_template = """
     <!DOCTYPE html>
@@ -333,6 +378,8 @@ with col_jogo:
     const URIS = __ASSETS_URI__;
     const STORAGE_KEY = "coleta_seletiva_recorde_v2";
     const NOME_JOGADOR = __NOME_JOGADOR__;
+    const PARTIDA_ID = __PARTIDA_ID__;
+    const ASSINATURAS = __ASSINATURAS__;
 
     function focarCanvas() {
       canvas.focus();
@@ -352,6 +399,27 @@ with col_jogo:
       try {
         localStorage.setItem(STORAGE_KEY, String(novoRecorde));
       } catch (e) {}
+    }
+
+    function enviarPontuacaoAutomatica(ptsFinal) {
+      const pts = Math.max(0, Math.min(20, ptsFinal));
+      const sig = ASSINATURAS[String(pts)] || "";
+      try {
+        const parentUrl = new URL(window.parent.location.href);
+        parentUrl.searchParams.set("p_nome", NOME_JOGADOR);
+        parentUrl.searchParams.set("p_pts", String(pts));
+        parentUrl.searchParams.set("p_id", PARTIDA_ID);
+        parentUrl.searchParams.set("p_sig", sig);
+        window.parent.location.href = parentUrl.toString();
+      } catch (e) {
+        // Fallback caso o navegador restrinja window.parent
+        const url = new URL(window.location.href);
+        url.searchParams.set("p_nome", NOME_JOGADOR);
+        url.searchParams.set("p_pts", String(pts));
+        url.searchParams.set("p_id", PARTIDA_ID);
+        url.searchParams.set("p_sig", sig);
+        window.top.location.href = url.toString();
+      }
     }
 
     function loadImg(src) {
@@ -425,6 +493,7 @@ with col_jogo:
     let estado = "instrucoes";
     let pausado = false;
     let pausadoEm = 0;
+    let pontuacaoEnviada = false;
 
     let pontos = 0;
     let recorde = lerRecorde();
@@ -535,6 +604,7 @@ with col_jogo:
       const agora = performance.now();
       estado = "jogo";
       pausado = false;
+      pontuacaoEnviada = false;
       atualizarBotaoPausar();
       pontos = 0;
       vidas = 5;
@@ -676,7 +746,7 @@ with col_jogo:
           dicaVisivel = false;
           clones = [];
           playSound(sons.fim);
-          encerrarEm = agora + 2800;
+          encerrarEm = agora + 2200;
         } else if (pontos > 19) {
           estado = "vitoria";
           pausado = false;
@@ -685,11 +755,12 @@ with col_jogo:
           dicaVisivel = false;
           clones = [];
           playSound(sons.vitoria);
-          encerrarEm = agora + 2800;
+          encerrarEm = agora + 2200;
         }
       } else if (estado === "fim" || estado === "vitoria") {
-        if (agora >= encerrarEm) {
-          estado = "instrucoes";
+        if (agora >= encerrarEm && !pontuacaoEnviada) {
+          pontuacaoEnviada = true;
+          enviarPontuacaoAutomatica(pontos);
         }
       }
 
@@ -815,6 +886,15 @@ with col_jogo:
           ctx.fillText("Toque em Continuar ou aperte P", W / 2, H / 2 + 22);
           ctx.textAlign = "left";
         }
+      } else if (estado === "fim" || estado === "vitoria") {
+        ctx.fillStyle = "rgba(15, 25, 18, 0.88)";
+        roundRect(W / 2 - 150, H - 44, 300, 32, 8);
+        ctx.fill();
+        ctx.fillStyle = "#a5d6a7";
+        ctx.font = "bold 13px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Salvando " + pontos + " pts no pódio automaticamente...", W / 2, H - 23);
+        ctx.textAlign = "left";
       }
 
       ctx.restore();
@@ -831,45 +911,28 @@ with col_jogo:
     html_jogo = (
         html_template
         .replace("__ASSETS_URI__", json.dumps(assets_uri))
-        .replace("__NOME_JOGADOR__", json.dumps(nome_jogador))
+        .replace("__NOME_JOGADOR__", json.dumps(nome_seguro))
+        .replace("__PARTIDA_ID__", json.dumps(partida_id_atual))
+        .replace("__ASSINATURAS__", json.dumps(assinaturas_validas))
     )
 
     components.html(html_jogo, height=495, scrolling=False)
 
 with col_ranking:
     st.markdown('<div class="ranking-card">', unsafe_allow_html=True)
-    st.subheader("🏆 Ranking de Jogadores")
-    st.caption("Registre sua pontuação após finalizar a partida:")
-
-    with st.form("form_ranking", clear_on_submit=False):
-        r_col1, r_col2 = st.columns([1.2, 1])
-        with r_col1:
-            pontos_registrar = st.number_input(
-                "Pontos feitos",
-                min_value=0,
-                max_value=20,
-                value=20,
-                step=1,
-            )
-        with r_col2:
-            st.write("")
-            st.write("")
-            enviado = st.form_submit_button("💾 Salvar", use_container_width=True)
-
-        if enviado:
-            salvar_no_ranking(nome_jogador, pontos_registrar)
-            st.success(f"Pontuação de **{nome_jogador}** salva!")
+    st.subheader("🏆 Pódio Oficial")
+    st.caption("Atualizado automaticamente ao final de cada partida.")
 
     ranking_atual = carregar_ranking()
 
     if not ranking_atual:
-        st.info("Nenhuma pontuação registrada ainda. Seja o primeiro a entrar no pódio!")
+        st.info("Nenhuma partida finalizada ainda. Jogue para inaugurar o pódio!")
     else:
         medalhas = ["🥇", "🥈", "🥉"]
         for idx, item in enumerate(ranking_atual[:10]):
             pos = medalhas[idx] if idx < 3 else f"#{idx + 1}"
             cor_fundo = (
-                "rgba(255, 215, 0, 0.15)"
+                "rgba(255, 215, 0, 0.16)"
                 if idx == 0
                 else "rgba(255, 255, 255, 0.05)"
             )
@@ -880,13 +943,13 @@ with col_ranking:
                     justify-content:space-between;
                     align-items:center;
                     background:{cor_fundo};
-                    padding:8px 12px;
-                    border-radius:8px;
-                    margin-bottom:6px;
+                    padding:10px 14px;
+                    border-radius:10px;
+                    margin-bottom:8px;
                     border: 1px solid rgba(255,255,255,0.08);
                 ">
                     <span><b>{pos} {item['nome']}</b> <small style="color:#a5d6a7;">({item['data']})</small></span>
-                    <span style="font-weight:bold; color:#ffe082;">{item['pontos']} pts</span>
+                    <span style="font-weight:bold; color:#ffe082; font-size:1.05rem;">{item['pontos']} pts</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
