@@ -21,7 +21,8 @@ PASTA_RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_ASSETS = os.path.join(PASTA_RAIZ, "dependencias")
 ARQUIVO_RANKING_LOCAL = os.path.join(PASTA_RAIZ, "ranking.json")
 
-# Configurações do GitHub via st.secrets (opcional no local, obrigatório no Streamlit Cloud)
+# URL oficial do seu app no Streamlit Cloud
+APP_URL = st.secrets.get("APP_URL", "https://coletaseletiva1.streamlit.app")
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
 GITHUB_FILE_PATH = "ranking.json"
@@ -33,9 +34,9 @@ def gerar_assinatura(nome: str, pontos: int, partida_id: str) -> str:
 
 
 def ler_ranking_github():
-    """Lê o ranking.json diretamente da API do GitHub (retorna lista e sha do arquivo)."""
+    """Lê o ranking.json da API do GitHub. Retorna (lista, sha, erro_str)."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
-        return None, None
+        return None, None, "GITHUB_TOKEN ou GITHUB_REPO não configurados nos Secrets."
 
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
     req = urllib.request.Request(
@@ -47,23 +48,24 @@ def ler_ranking_github():
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
             conteudo_decodificado = base64.b64decode(payload["content"]).decode("utf-8")
             dados = json.loads(conteudo_decodificado)
-            return sorted(dados, key=lambda x: (-x["pontos"], x["data"])), payload["sha"]
+            return sorted(dados, key=lambda x: (-x["pontos"], x["data"])), payload["sha"], None
     except urllib.error.HTTPError as e:
+        detalhe = e.read().decode("utf-8", errors="ignore")
         if e.code == 404:
-            return [], None
-        return None, None
-    except Exception:
-        return None, None
+            return [], None, None
+        return None, None, f"Erro HTTP {e.code} ao ler GitHub: {detalhe}"
+    except Exception as e:
+        return None, None, f"Erro de conexão ao ler GitHub: {e}"
 
 
 def gravar_ranking_github(novo_ranking, sha_atual):
-    """Atualiza o ranking.json no repositório GitHub via API."""
+    """Atualiza o ranking.json no GitHub. Retorna (sucesso_bool, erro_str)."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
-        return False
+        return False, "Secrets do GitHub ausentes."
 
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
     conteudo_str = json.dumps(novo_ranking, ensure_ascii=False, indent=2)
@@ -88,14 +90,17 @@ def gravar_ranking_github(novo_ranking, sha_atual):
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            return resp.status in (200, 201)
-    except Exception:
-        return False
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status in (200, 201), None
+    except urllib.error.HTTPError as e:
+        detalhe = e.read().decode("utf-8", errors="ignore")
+        return False, f"Erro HTTP {e.code} ao gravar no GitHub: {detalhe}"
+    except Exception as e:
+        return False, f"Erro ao gravar no GitHub: {e}"
 
 
 def carregar_ranking():
-    dados_gh, _ = ler_ranking_github()
+    dados_gh, _, _ = ler_ranking_github()
     if dados_gh is not None:
         return dados_gh
 
@@ -113,11 +118,11 @@ def salvar_no_ranking(nome: str, pontos: int, partida_id: str):
     nome_limpo = (nome or "Jogador").strip()[:20] or "Jogador"
     pontos_int = max(0, min(20, int(pontos)))
 
-    dados_gh, sha_gh = ler_ranking_github()
+    dados_gh, sha_gh, erro_leitura = ler_ranking_github()
     ranking = dados_gh if dados_gh is not None else carregar_ranking()
 
     if any(item.get("partida_id") == partida_id for item in ranking):
-        return False
+        return True, None
 
     ranking.append(
         {
@@ -129,18 +134,19 @@ def salvar_no_ranking(nome: str, pontos: int, partida_id: str):
     )
     ranking = sorted(ranking, key=lambda x: (-x["pontos"], x["data"]))[:15]
 
-    # Tenta salvar no GitHub; se não configurado, salva localmente
     if dados_gh is not None:
-        salvou = gravar_ranking_github(ranking, sha_gh)
+        salvou, erro_gravacao = gravar_ranking_github(ranking, sha_gh)
         if salvou:
-            return True
+            return True, None
+        return False, erro_gravacao
 
+    # Fallback local caso GitHub não esteja configurado
     try:
         with open(ARQUIVO_RANKING_LOCAL, "w", encoding="utf-8") as f:
             json.dump(ranking, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception:
-        return False
+        return True, erro_leitura
+    except Exception as e:
+        return False, str(e)
 
 
 # --- CAPTURA DA PONTUAÇÃO ENVIADA PELO JOGO ---
@@ -155,14 +161,17 @@ if "p_pts" in params and "p_nome" in params and "p_id" in params and "p_sig" in 
         st.session_state["jogador_atual"] = p_nome
 
         if gerar_assinatura(p_nome, p_pts, p_id) == p_sig:
-            if salvar_no_ranking(p_nome, p_pts, p_id):
+            ok, erro_msg = salvar_no_ranking(p_nome, p_pts, p_id)
+            if ok:
                 st.session_state["ultimo_registro"] = (
                     f"🏆 Pontuação de **{p_nome}** ({p_pts} pts) salva no pódio!"
                 )
+            if erro_msg:
+                st.session_state["erro_registro"] = f"⚠️ Aviso GitHub: {erro_msg}"
         else:
             st.session_state["erro_registro"] = "⚠️ Assinatura inválida. Pontuação não registrada."
     except Exception as e:
-        st.session_state["erro_registro"] = f"⚠️ Erro ao salvar: {e}"
+        st.session_state["erro_registro"] = f"⚠️ Erro ao processar pontuação: {e}"
     finally:
         st.query_params.clear()
         st.rerun()
@@ -373,7 +382,6 @@ with col_jogo:
         touch-action: none;
         display: block;
       }
-      /* Botão-link target="_top" que o navegador nunca bloqueia */
       #link-salvar-podio {
         display: none;
         position: absolute;
@@ -465,7 +473,7 @@ with col_jogo:
     <div class="game-wrapper">
       <canvas id="game" width="480" height="360" tabindex="0"></canvas>
 
-      <a id="link-salvar-podio" target="_top" href="#">🏆 Registrar no Pódio</a>
+      <a id="link-salvar-podio" target="_top" rel="noopener" href="#">🏆 Registrar no Pódio</a>
 
       <div class="lixeiras-touch">
         <button type="button" class="btn-lixeira b1 ativa" data-tipo="1">1·Papel</button>
@@ -498,6 +506,7 @@ with col_jogo:
     const W = 480, H = 360;
     const URIS = __ASSETS_URI__;
     const STORAGE_KEY = "coleta_seletiva_recorde_v2";
+    const APP_URL = __APP_URL__;
     const NOME_JOGADOR = __NOME_JOGADOR__;
     const PARTIDA_ID = __PARTIDA_ID__;
     const ASSINATURAS = __ASSINATURAS__;
@@ -526,8 +535,7 @@ with col_jogo:
       const pts = Math.max(0, Math.min(20, ptsFinal));
       const sig = ASSINATURAS[String(pts)] || "";
 
-      const baseUrl = (document.referrer || window.location.href).split("?")[0];
-      const destino = new URL(baseUrl);
+      const destino = new URL(APP_URL);
       destino.searchParams.set("p_nome", NOME_JOGADOR);
       destino.searchParams.set("p_pts", String(pts));
       destino.searchParams.set("p_id", PARTIDA_ID);
@@ -1011,6 +1019,7 @@ with col_jogo:
     html_jogo = (
         html_template
         .replace("__ASSETS_URI__", json.dumps(assets_uri))
+        .replace("__APP_URL__", json.dumps(APP_URL))
         .replace("__NOME_JOGADOR__", json.dumps(nome_seguro))
         .replace("__PARTIDA_ID__", json.dumps(partida_id_atual))
         .replace("__ASSINATURAS__", json.dumps(assinaturas_validas))
@@ -1021,12 +1030,14 @@ with col_jogo:
 with col_ranking:
     st.markdown('<div class="ranking-card">', unsafe_allow_html=True)
     st.subheader("🏆 Pódio Oficial")
-    if GITHUB_TOKEN and GITHUB_REPO:
-        st.caption("Sincronizado em tempo real com o GitHub.")
-    else:
-        st.caption("Configure GITHUB_TOKEN e GITHUB_REPO nos Secrets para persistir na nuvem.")
 
-    ranking_atual = carregar_ranking()
+    dados_gh, _, erro_gh = ler_ranking_github()
+    if dados_gh is not None:
+        st.caption("✅ Conectado ao GitHub.")
+    else:
+        st.warning(f"⚠️ Modo local: {erro_gh}")
+
+    ranking_atual = dados_gh if dados_gh is not None else carregar_ranking()
 
     if not ranking_atual:
         st.info("Nenhuma partida finalizada ainda. Jogue para inaugurar o pódio!")
