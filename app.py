@@ -7,7 +7,6 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 import streamlit as st
-import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="♻️ Coleta Seletiva",
@@ -140,7 +139,6 @@ def salvar_no_ranking(nome: str, pontos: int, partida_id: str):
             return True, None
         return False, erro_gravacao
 
-    # Fallback local caso GitHub não esteja configurado
     try:
         with open(ARQUIVO_RANKING_LOCAL, "w", encoding="utf-8") as f:
             json.dump(ranking, f, ensure_ascii=False, indent=2)
@@ -1025,7 +1023,11 @@ with col_jogo:
         .replace("__ASSINATURAS__", json.dumps(assinaturas_validas))
     )
 
-    components.html(html_jogo, height=495, scrolling=False)
+    if hasattr(st, "iframe"):
+        st.iframe(html_jogo, height=495, scrolling=False)
+    else:
+        import streamlit.components.v1 as components
+        components.html(html_jogo, height=495, scrolling=False)
 
 with col_ranking:
     st.markdown('<div class="ranking-card">', unsafe_allow_html=True)
