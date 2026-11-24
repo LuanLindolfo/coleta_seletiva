@@ -14,7 +14,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Chave interna para validar que a pontuação veio realmente do jogo
 CHAVE_SECRETA = "coleta_seletiva_anti_fraude_2026"
 
 PASTA_RAIZ = os.path.dirname(os.path.abspath(__file__))
@@ -43,9 +42,8 @@ def salvar_no_ranking(nome: str, pontos: int, partida_id: str):
     pontos_int = max(0, min(20, int(pontos)))
     ranking = carregar_ranking()
 
-    # Evita duplicar a mesma partida caso a página recarregue
     if any(item.get("partida_id") == partida_id for item in ranking):
-        return
+        return False
 
     ranking.append(
         {
@@ -58,6 +56,7 @@ def salvar_no_ranking(nome: str, pontos: int, partida_id: str):
     ranking = sorted(ranking, key=lambda x: (-x["pontos"], x["data"]))[:15]
     with open(ARQUIVO_RANKING, "w", encoding="utf-8") as f:
         json.dump(ranking, f, ensure_ascii=False, indent=2)
+    return True
 
 
 # --- CAPTURA AUTOMÁTICA DA PONTUAÇÃO ENVIADA PELO JOGO ---
@@ -69,14 +68,21 @@ if "p_pts" in params and "p_nome" in params and "p_id" in params and "p_sig" in 
         p_id = str(params["p_id"])
         p_sig = str(params["p_sig"])
 
+        st.session_state["jogador_atual"] = p_nome
+
         if gerar_assinatura(p_nome, p_pts, p_id) == p_sig:
-            salvar_no_ranking(p_nome, p_pts, p_id)
-            st.session_state["ultimo_registro"] = f"✅ Pontuação de **{p_nome}** ({p_pts} pts) registrada no pódio!"
+            if salvar_no_ranking(p_nome, p_pts, p_id):
+                st.session_state["ultimo_registro"] = (
+                    f"🏆 Pontuação de **{p_nome}** ({p_pts} pts) salva no pódio!"
+                )
     except Exception:
         pass
     finally:
         st.query_params.clear()
         st.rerun()
+
+if "jogador_atual" not in st.session_state:
+    st.session_state["jogador_atual"] = "Jogador"
 
 # --- CSS PERSONALIZADO ---
 st.markdown(
@@ -138,7 +144,7 @@ st.markdown(
 )
 
 if "ultimo_registro" in st.session_state:
-    st.toast(st.session_state.pop("ultimo_registro"), icon="🏆")
+    st.success(st.session_state.pop("ultimo_registro"))
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.markdown('<div class="bin-card" style="background:#1565c0;">1 · PAPEL</div>', unsafe_allow_html=True)
@@ -225,12 +231,11 @@ col_jogo, col_ranking = st.columns([1.45, 1], gap="large")
 with col_jogo:
     nome_jogador = st.text_input(
         "👤 Seu nome antes de começar a jogar:",
-        value="Jogador",
+        key="jogador_atual",
         max_chars=20,
         placeholder="Digite seu apelido...",
     )
 
-    # Pré-gera assinaturas válidas para todas as pontuações possíveis (0 a 20) desta sessão
     partida_id_atual = datetime.now().strftime("%Y%m%d%H%M%S%f")
     nome_seguro = (nome_jogador or "Jogador").strip()[:20] or "Jogador"
     assinaturas_validas = {
@@ -404,21 +409,29 @@ with col_jogo:
     function enviarPontuacaoAutomatica(ptsFinal) {
       const pts = Math.max(0, Math.min(20, ptsFinal));
       const sig = ASSINATURAS[String(pts)] || "";
+
+      // Descobre a URL da página principal (funciona tanto local quanto no Streamlit Cloud cross-origin)
+      let baseUrl = "";
       try {
-        const parentUrl = new URL(window.parent.location.href);
-        parentUrl.searchParams.set("p_nome", NOME_JOGADOR);
-        parentUrl.searchParams.set("p_pts", String(pts));
-        parentUrl.searchParams.set("p_id", PARTIDA_ID);
-        parentUrl.searchParams.set("p_sig", sig);
-        window.parent.location.href = parentUrl.toString();
+        baseUrl = window.parent.location.href;
       } catch (e) {
-        // Fallback caso o navegador restrinja window.parent
-        const url = new URL(window.location.href);
-        url.searchParams.set("p_nome", NOME_JOGADOR);
-        url.searchParams.set("p_pts", String(pts));
-        url.searchParams.set("p_id", PARTIDA_ID);
-        url.searchParams.set("p_sig", sig);
-        window.top.location.href = url.toString();
+        baseUrl = document.referrer || window.location.href;
+      }
+
+      try {
+        const destino = new URL(baseUrl);
+        destino.searchParams.set("p_nome", NOME_JOGADOR);
+        destino.searchParams.set("p_pts", String(pts));
+        destino.searchParams.set("p_id", PARTIDA_ID);
+        destino.searchParams.set("p_sig", sig);
+        window.top.location.assign(destino.toString());
+      } catch (e) {
+        const qs =
+          "?p_nome=" + encodeURIComponent(NOME_JOGADOR) +
+          "&p_pts=" + encodeURIComponent(String(pts)) +
+          "&p_id=" + encodeURIComponent(PARTIDA_ID) +
+          "&p_sig=" + encodeURIComponent(sig);
+        window.top.location.assign(qs);
       }
     }
 
@@ -498,7 +511,7 @@ with col_jogo:
     let pontos = 0;
     let recorde = lerRecorde();
     let vidas = 5;
-    let velocidade = 3.0;
+    let velocidade = 2.1; // Velocidade inicial de queda reduzida
     let ultimoTipo = 1;
 
     let lixeiraX = 0;
@@ -608,7 +621,7 @@ with col_jogo:
       atualizarBotaoPausar();
       pontos = 0;
       vidas = 5;
-      velocidade = 3.0;
+      velocidade = 2.1; // Velocidade inicial mais suave
       ultimoTipo = 1;
       lixeiraX = 0;
       lixeiraY = -135;
@@ -619,7 +632,7 @@ with col_jogo:
       feedbacks = [];
       flashErroAte = 0;
       ultimoAumentoVel = agora;
-      proximoSpawn = agora + 1200;
+      proximoSpawn = agora + 1300;
     }
 
     btnIniciarTop.addEventListener("click", () => {
@@ -679,13 +692,15 @@ with col_jogo:
       const tempoRef = pausado ? pausadoEm : agora;
 
       if (estado === "jogo" && !pausado) {
-        if (agora - ultimoAumentoVel >= 6000) {
-          velocidade += 0.4;
+        // Aumenta a velocidade mais devagar (a cada 7s, +0.25)
+        if (agora - ultimoAumentoVel >= 7000) {
+          velocidade += 0.25;
           ultimoAumentoVel = agora;
         }
 
-        if (teclas["ArrowLeft"] || teclas["KeyA"]) lixeiraX -= 12;
-        if (teclas["ArrowRight"] || teclas["KeyD"]) lixeiraX += 12;
+        // Movimento da lixeira no teclado mais suave (7.5 em vez de 12)
+        if (teclas["ArrowLeft"] || teclas["KeyA"]) lixeiraX -= 7.5;
+        if (teclas["ArrowRight"] || teclas["KeyD"]) lixeiraX += 7.5;
         if (lixeiraX > 205) lixeiraX = 205;
         if (lixeiraX < -205) lixeiraX = -205;
 
@@ -698,7 +713,7 @@ with col_jogo:
             item,
             tipo
           });
-          proximoSpawn = agora + (1100 + Math.random() * 900);
+          proximoSpawn = agora + (1350 + Math.random() * 950);
         }
 
         const imgL = imgs.lixeira[lixeiraFantasia - 1];
@@ -746,7 +761,7 @@ with col_jogo:
           dicaVisivel = false;
           clones = [];
           playSound(sons.fim);
-          encerrarEm = agora + 2200;
+          encerrarEm = agora + 1800;
         } else if (pontos > 19) {
           estado = "vitoria";
           pausado = false;
@@ -755,7 +770,7 @@ with col_jogo:
           dicaVisivel = false;
           clones = [];
           playSound(sons.vitoria);
-          encerrarEm = agora + 2200;
+          encerrarEm = agora + 1800;
         }
       } else if (estado === "fim" || estado === "vitoria") {
         if (agora >= encerrarEm && !pontuacaoEnviada) {
@@ -887,13 +902,13 @@ with col_jogo:
           ctx.textAlign = "left";
         }
       } else if (estado === "fim" || estado === "vitoria") {
-        ctx.fillStyle = "rgba(15, 25, 18, 0.88)";
-        roundRect(W / 2 - 150, H - 44, 300, 32, 8);
+        ctx.fillStyle = "rgba(15, 25, 18, 0.9)";
+        roundRect(W / 2 - 155, H - 44, 310, 32, 8);
         ctx.fill();
         ctx.fillStyle = "#a5d6a7";
         ctx.font = "bold 13px sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText("Salvando " + pontos + " pts no pódio automaticamente...", W / 2, H - 23);
+        ctx.fillText("Registrando " + pontos + " pts no pódio...", W / 2, H - 23);
         ctx.textAlign = "left";
       }
 
