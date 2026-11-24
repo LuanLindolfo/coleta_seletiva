@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# --- CSS PERSONALIZADO PARA DEIXAR O DASHBOARD MAIS ATRATIVO ---
+# --- CSS PERSONALIZADO ---
 st.markdown(
     """
     <style>
@@ -66,7 +66,7 @@ PASTA_RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_ASSETS = os.path.join(PASTA_RAIZ, "dependencias")
 ARQUIVO_RANKING = os.path.join(PASTA_RAIZ, "ranking.json")
 
-# --- FUNÇÕES DE RANKING ---
+
 def carregar_ranking():
     if not os.path.exists(ARQUIVO_RANKING):
         return []
@@ -93,7 +93,6 @@ def salvar_no_ranking(nome, pontos):
         json.dump(ranking, f, ensure_ascii=False, indent=2)
 
 
-# --- CABEÇALHO ---
 st.markdown(
     """
     <div class="header-box">
@@ -104,7 +103,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- LEGENDA VISUAL DAS LIXEIRAS ---
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.markdown('<div class="bin-card" style="background:#1565c0;">1 · PAPEL</div>', unsafe_allow_html=True)
 c2.markdown('<div class="bin-card" style="background:#c62828;">2 · PLÁSTICO</div>', unsafe_allow_html=True)
@@ -112,7 +110,6 @@ c3.markdown('<div class="bin-card" style="background:#2e7d32;">3 · VIDRO</div>'
 c4.markdown('<div class="bin-card" style="background:#f9a825; color:#1b1b1b;">4 · METAL</div>', unsafe_allow_html=True)
 c5.markdown('<div class="bin-card" style="background:#5d4037;">5 · ORGÂNICO</div>', unsafe_allow_html=True)
 
-# --- CARREGAMENTO DOS ASSETS ---
 arquivos_em_falta = []
 arquivos_carregados = 0
 
@@ -186,7 +183,6 @@ if not os.path.isdir(PASTA_ASSETS):
 elif arquivos_em_falta:
     st.warning(f"Arquivos ausentes ({len(arquivos_em_falta)}): " + ", ".join(arquivos_em_falta))
 
-# --- LAYOUT PRINCIPAL: JOGO À ESQUERDA, RANKING À DIREITA (EMPILHA NO MOBILE) ---
 col_jogo, col_ranking = st.columns([1.45, 1], gap="large")
 
 with col_jogo:
@@ -197,19 +193,19 @@ with col_jogo:
         placeholder="Digite seu apelido...",
     )
 
-    html_jogo = f"""
+    html_template = """
     <!DOCTYPE html>
     <html>
     <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <style>
-      * {{
+      * {
         box-sizing: border-box;
         -webkit-tap-highlight-color: transparent;
         user-select: none;
-      }}
-      body {{
+      }
+      body {
         margin: 0;
         padding: 4px;
         background: transparent;
@@ -218,15 +214,15 @@ with col_jogo:
         align-items: center;
         font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
         touch-action: manipulation;
-      }}
-      .game-wrapper {{
+      }
+      .game-wrapper {
         width: 100%;
         max-width: 520px;
         display: flex;
         flex-direction: column;
         align-items: center;
-      }}
-      canvas {{
+      }
+      canvas {
         width: 100%;
         height: auto;
         aspect-ratio: 4 / 3;
@@ -237,16 +233,15 @@ with col_jogo:
         outline: none;
         touch-action: none;
         display: block;
-      }}
-      /* Controles táteis das 5 lixeiras para Mobile e Desktop */
-      .lixeiras-touch {{
+      }
+      .lixeiras-touch {
         display: grid;
         grid-template-columns: repeat(5, 1fr);
         gap: 6px;
         width: 100%;
         margin-top: 10px;
-      }}
-      .btn-lixeira {{
+      }
+      .btn-lixeira {
         border: 2px solid transparent;
         border-radius: 10px;
         padding: 10px 2px;
@@ -257,22 +252,22 @@ with col_jogo:
         transition: transform 0.08s ease, border-color 0.15s ease;
         text-align: center;
         box-shadow: 0 3px 8px rgba(0,0,0,0.3);
-      }}
-      .btn-lixeira:active {{
+      }
+      .btn-lixeira:active {
         transform: scale(0.94);
-      }}
-      .btn-lixeira.ativa {{
+      }
+      .btn-lixeira.ativa {
         border-color: #ffffff;
         transform: translateY(-3px);
         box-shadow: 0 0 12px rgba(255, 255, 255, 0.65);
-      }}
-      .b1 {{ background: #1565c0; }}
-      .b2 {{ background: #c62828; }}
-      .b3 {{ background: #2e7d32; }}
-      .b4 {{ background: #f9a825; color: #1b1b1b; }}
-      .b5 {{ background: #5d4037; }}
+      }
+      .b1 { background: #1565c0; }
+      .b2 { background: #c62828; }
+      .b3 { background: #2e7d32; }
+      .b4 { background: #f9a825; color: #1b1b1b; }
+      .b5 { background: #5d4037; }
 
-      .barra-inferior {{
+      .barra-inferior {
         margin-top: 10px;
         width: 100%;
         display: flex;
@@ -282,13 +277,13 @@ with col_jogo:
         gap: 8px;
         font-size: 12px;
         color: #c8e6c9;
-      }}
-      .acoes {{
+      }
+      .acoes {
         display: flex;
         gap: 6px;
         flex-wrap: wrap;
-      }}
-      .btn-mini {{
+      }
+      .btn-mini {
         background: #233327;
         color: #e8f5e9;
         border: 1px solid #4caf50;
@@ -297,10 +292,10 @@ with col_jogo:
         font-size: 12px;
         font-weight: 600;
         cursor: pointer;
-      }}
-      .btn-mini:active {{
+      }
+      .btn-mini:active {
         background: #354f3c;
-      }}
+      }
     </style>
     </head>
     <body>
@@ -335,89 +330,89 @@ with col_jogo:
     const botoesLixeira = document.querySelectorAll(".btn-lixeira");
 
     const W = 480, H = 360;
-    const URIS = {json.dumps(assets_uri)};
+    const URIS = __ASSETS_URI__;
     const STORAGE_KEY = "coleta_seletiva_recorde_v2";
-    const NOME_JOGADOR = {json.dumps(nome_jogador)};
+    const NOME_JOGADOR = __NOME_JOGADOR__;
 
-    function focarCanvas() {{
+    function focarCanvas() {
       canvas.focus();
       statusFoco.textContent = "Controles ativos (Toque ou Teclado)";
-    }}
+    }
 
-    function lerRecorde() {{
-      try {{
+    function lerRecorde() {
+      try {
         const val = parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
         return Number.isNaN(val) ? 0 : Math.max(0, val);
-      }} catch (e) {{
+      } catch (e) {
         return 0;
-      }}
-    }}
+      }
+    }
 
-    function salvarRecorde(novoRecorde) {{
-      try {{
+    function salvarRecorde(novoRecorde) {
+      try {
         localStorage.setItem(STORAGE_KEY, String(novoRecorde));
-      }} catch (e) {{}}
-    }}
+      } catch (e) {}
+    }
 
-    function loadImg(src) {{
+    function loadImg(src) {
       const img = new Image();
       if (src) img.src = src;
       return img;
-    }}
+    }
 
-    function loadAudio(src) {{
+    function loadAudio(src) {
       if (!src) return null;
       return new Audio(src);
-    }}
+    }
 
     let mudo = false;
-    function alternarMute() {{
+    function alternarMute() {
       mudo = !mudo;
       btnMute.textContent = mudo ? "🔇 Mudo" : "🔊 Som";
       focarCanvas();
-    }}
+    }
     btnMute.addEventListener("click", alternarMute);
 
-    function playSound(aud) {{
+    function playSound(aud) {
       if (!aud || mudo) return;
-      try {{
+      try {
         aud.currentTime = 0;
-        aud.play().catch(() => {{}});
-      }} catch (e) {{}}
-    }}
+        aud.play().catch(() => {});
+      } catch (e) {}
+    }
 
-    const imgs = {{
-      bg: {{
+    const imgs = {
+      bg: {
         instrucoes: loadImg(URIS.bg_instrucoes),
         jogo: loadImg(URIS.bg_jogo),
         fim: loadImg(URIS.bg_fim),
         vitoria: loadImg(URIS.bg_vitoria),
-      }},
+      },
       botao: loadImg(URIS.botao_iniciar),
       lixeira: URIS.lixeira.map(loadImg),
       lixo: URIS.lixo.map(loadImg),
       dica: URIS.dica.map(loadImg),
-    }};
+    };
 
-    const sons = {{
+    const sons = {
       acerto: loadAudio(URIS.som_acerto),
       erro: loadAudio(URIS.som_erro),
       fim: loadAudio(URIS.som_fim),
       vitoria: loadAudio(URIS.som_vitoria),
-    }};
+    };
 
-    function scratchToCanvas(x, y, w, h, rotCenter = null) {{
-      if (rotCenter) {{
+    function scratchToCanvas(x, y, w, h, rotCenter = null) {
+      if (rotCenter) {
         return [W / 2 + x - rotCenter[0], H / 2 - y - rotCenter[1]];
-      }}
+      }
       return [W / 2 + x - w / 2, H / 2 - y - h / 2];
-    }}
+    }
 
-    function imagemPronta(img) {{
+    function imagemPronta(img) {
       return Boolean(img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0);
-    }}
+    }
 
-    function roundRect(x, y, w, h, r) {{
+    function roundRect(x, y, w, h, r) {
       ctx.beginPath();
       ctx.moveTo(x + r, y);
       ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -425,14 +420,13 @@ with col_jogo:
       ctx.arcTo(x, y + h, x, y, r);
       ctx.arcTo(x, y, x + w, y, r);
       ctx.closePath();
-    }}
+    }
 
     let estado = "instrucoes";
     let pausado = false;
     let pausadoEm = 0;
 
     let pontos = 0;
-    let ultimaPontuacaoFinal = 0;
     let recorde = lerRecorde();
     let vidas = 5;
     let velocidade = 3.0;
@@ -454,68 +448,67 @@ with col_jogo:
     let ultimoAumentoVel = 0;
     let encerrarEm = 0;
 
-    const teclas = {{}};
+    const teclas = {};
 
-    function selecionarLixeira(tipo) {{
+    function selecionarLixeira(tipo) {
       lixeiraFantasia = tipo;
-      botoesLixeira.forEach((btn) => {{
+      botoesLixeira.forEach((btn) => {
         btn.classList.toggle("ativa", Number(btn.dataset.tipo) === tipo);
-      }});
-    }}
+      });
+    }
 
-    botoesLixeira.forEach((btn) => {{
-      btn.addEventListener("pointerdown", (e) => {{
+    botoesLixeira.forEach((btn) => {
+      btn.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         const tipo = Number(btn.dataset.tipo);
         selecionarLixeira(tipo);
         if (estado === "instrucoes") iniciarPartida();
         focarCanvas();
-      }});
-    }});
+      });
+    });
 
-    // --- CONTROLE POR TOQUE / ARRASTAR NO CANVAS (MOBILE & MOUSE) ---
     let arrastando = false;
 
-    function atualizarPosicaoPorPonteiro(clientX) {{
+    function atualizarPosicaoPorPonteiro(clientX) {
       const rect = canvas.getBoundingClientRect();
-      const relX = (clientX - rect.left) / rect.width; // 0 a 1
+      const relX = (clientX - rect.left) / rect.width;
       const scratchX = (relX * W) - (W / 2);
       lixeiraX = Math.max(-205, Math.min(205, scratchX));
-    }}
+    }
 
-    canvas.addEventListener("pointerdown", (e) => {{
+    canvas.addEventListener("pointerdown", (e) => {
       focarCanvas();
-      if (estado === "instrucoes") {{
+      if (estado === "instrucoes") {
         iniciarPartida();
         return;
-      }}
-      if (estado === "jogo" && !pausado) {{
+      }
+      if (estado === "jogo" && !pausado) {
         arrastando = true;
         atualizarPosicaoPorPonteiro(e.clientX);
-      }}
-    }});
+      }
+    });
 
-    canvas.addEventListener("pointermove", (e) => {{
-      if (arrastando && estado === "jogo" && !pausado) {{
+    canvas.addEventListener("pointermove", (e) => {
+      if (arrastando && estado === "jogo" && !pausado) {
         atualizarPosicaoPorPonteiro(e.clientX);
-      }}
-    }});
+      }
+    });
 
-    window.addEventListener("pointerup", () => {{
+    window.addEventListener("pointerup", () => {
       arrastando = false;
-    }});
+    });
 
-    function atualizarBotaoPausar() {{
+    function atualizarBotaoPausar() {
       btnPausar.textContent = pausado ? "▶ Continuar" : "⏸ Pausar";
-    }}
+    }
 
-    function alternarPausa() {{
+    function alternarPausa() {
       if (estado !== "jogo") return;
       const agora = performance.now();
-      if (!pausado) {{
+      if (!pausado) {
         pausado = true;
         pausadoEm = agora;
-      }} else {{
+      } else {
         const delta = agora - pausadoEm;
         ultimoAumentoVel += delta;
         proximoSpawn += delta;
@@ -523,36 +516,22 @@ with col_jogo:
         if (flashErroAte > 0) flashErroAte += delta;
         for (const fb of feedbacks) fb.criadoEm += delta;
         pausado = false;
-      }}
+      }
       atualizarBotaoPausar();
       focarCanvas();
-    }}
+    }
 
     btnPausar.addEventListener("click", alternarPausa);
 
-    function registrarPonto() {{
+    function registrarPonto() {
       pontos += 1;
-      if (pontos > recorde) {{
+      if (pontos > recorde) {
         recorde = pontos;
         salvarRecorde(recorde);
-      }}
-    }}
+      }
+    }
 
-    function salvarScoreLocal(pts) {{
-      try {{
-        const key = "coleta_ranking_local";
-        const lista = JSON.parse(localStorage.getItem(key) || "[]");
-        lista.push({{
-          nome: NOME_JOGADOR || "Jogador",
-          pontos: pts,
-          data: new Date().toLocaleTimeString([], {{hour: '2-digit', minute:'2-digit'}})
-        }});
-        lista.sort((a, b) => b.pontos - a.pontos);
-        localStorage.setItem(key, JSON.stringify(lista.slice(0, 10)));
-      }} catch (e) {{}}
-    }}
-
-    function iniciarPartida() {{
+    function iniciarPartida() {
       const agora = performance.now();
       estado = "jogo";
       pausado = false;
@@ -571,94 +550,346 @@ with col_jogo:
       flashErroAte = 0;
       ultimoAumentoVel = agora;
       proximoSpawn = agora + 1200;
-    }}
+    }
 
-    btnIniciarTop.addEventListener("click", () => {{
+    btnIniciarTop.addEventListener("click", () => {
       iniciarPartida();
       focarCanvas();
-    }});
+    });
 
-    window.addEventListener("keydown", (e) => {{
+    window.addEventListener("keydown", (e) => {
       teclas[e.code] = true;
-      if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code)) {{
+      if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code)) {
         e.preventDefault();
-      }}
-      if (e.key && e.key.toLowerCase() === "m") {{
+      }
+      if (e.key && e.key.toLowerCase() === "m") {
         alternarMute();
         return;
-      }}
-      if (e.key && e.key.toLowerCase() === "p") {{
+      }
+      if (e.key && e.key.toLowerCase() === "p") {
         alternarPausa();
         return;
-      }}
-      if (estado === "instrucoes" && e.code === "Space") {{
+      }
+      if (estado === "instrucoes" && e.code === "Space") {
         iniciarPartida();
-      }} else if (estado === "jogo" && !pausado) {{
-        if (["1", "2", "3", "4", "5"].includes(e.key)) {{
+      } else if (estado === "jogo" && !pausado) {
+        if (["1", "2", "3", "4", "5"].includes(e.key)) {
           selecionarLixeira(Number(e.key));
-        }}
-      }}
-    }});
+        }
+      }
+    });
 
-    window.addEventListener("keyup", (e) => {{
+    window.addEventListener("keyup", (e) => {
       teclas[e.code] = false;
-    }});
+    });
 
-    function adicionarFeedback(x, y, texto, cor) {{
-      feedbacks.push({{ x, y, texto, cor, criadoEm: performance.now() }});
-    }}
+    function adicionarFeedback(x, y, texto, cor) {
+      feedbacks.push({ x, y, texto, cor, criadoEm: performance.now() });
+    }
 
-    function dispararErro(tipoErrado, px = W / 2, py = H / 2) {{
+    function dispararErro(tipoErrado, px = W / 2, py = H / 2) {
       const agora = performance.now();
-      if (vidas > 0) {{
+      if (vidas > 0) {
         vidas -= 1;
         ultimoTipo = tipoErrado;
-      }}
+      }
       flashErroAte = agora + 240;
       adicionarFeedback(px, py, "-1 ❤️", "#ff5252");
       playSound(sons.erro);
       dicaFantasia = ultimoTipo;
       dicaVisivel = true;
       dicaAte = agora + 2600;
-    }}
+    }
 
-    function rectsColidem(a, b) {{
+    function rectsColidem(a, b) {
       return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-    }}
+    }
 
-    function loop(agora) {{
+    function loop(agora) {
       const tempoRef = pausado ? pausadoEm : agora;
 
-      if (estado === "jogo" && !pausado) {{
-        if (agora - ultimoAumentoVel >= 6000) {{
+      if (estado === "jogo" && !pausado) {
+        if (agora - ultimoAumentoVel >= 6000) {
           velocidade += 0.4;
           ultimoAumentoVel = agora;
-        }}
+        }
 
         if (teclas["ArrowLeft"] || teclas["KeyA"]) lixeiraX -= 12;
         if (teclas["ArrowRight"] || teclas["KeyD"]) lixeiraX += 12;
         if (lixeiraX > 205) lixeiraX = 205;
         if (lixeiraX < -205) lixeiraX = -205;
 
-        if (agora >= proximoSpawn) {{
+        if (agora >= proximoSpawn) {
           const item = Math.floor(Math.random() * 10) + 1;
           const tipo = ((item - 1) % 5) + 1;
-          clones.push({{
+          clones.push({
             x: Math.floor(Math.random() * 401) - 200,
             y: 175,
             item,
             tipo
-          }});
+          });
           proximoSpawn = agora + (1100 + Math.random() * 900);
-        }}
+        }
 
         const imgL = imgs.lixeira[lixeiraFantasia - 1];
         const lw = (imgL && imgL.naturalWidth) || 80;
         const lh = (imgL && imgL.naturalHeight) || 84;
         const [lx, ly] = scratchToCanvas(lixeiraX, lixeiraY, lw, lh, [40, 42]);
-        const rectLixeira = {{ x: lx, y: ly, w: lw, h: lh }};
+        const rectLixeira = { x: lx, y: ly, w: lw, h: lh };
 
         const restantes = [];
-        for (const c of clones) {{
+        for (const c of clones) {
           c.y -= velocidade;
-          const imgC = imgs.lixo[c.item -
+          const imgC = imgs.lixo[c.item - 1];
+          const cw = (imgC && imgC.naturalWidth) || 50;
+          const ch = (imgC && imgC.naturalHeight) || 50;
+          const [cx, cy] = scratchToCanvas(c.x, c.y, cw, ch);
+          const rectItem = { x: cx, y: cy, w: cw, h: ch };
+
+          if (rectsColidem(rectItem, rectLixeira)) {
+            if (lixeiraFantasia === c.tipo) {
+              registrarPonto();
+              adicionarFeedback(lx + lw / 2, ly - 6, "+1 ♻️", "#69f0ae");
+              playSound(sons.acerto);
+            } else {
+              dispararErro(c.tipo, lx + lw / 2, ly - 6);
+            }
+            continue;
+          }
+
+          if (c.y < -170) {
+            dispararErro(c.tipo, cx + cw / 2, H - 30);
+            continue;
+          }
+
+          restantes.push(c);
+        }
+        clones = restantes;
+
+        if (dicaVisivel && agora >= dicaAte) dicaVisivel = false;
+
+        if (vidas < 1) {
+          estado = "fim";
+          pausado = false;
+          atualizarBotaoPausar();
+          lixeiraVisivel = false;
+          dicaVisivel = false;
+          clones = [];
+          playSound(sons.fim);
+          encerrarEm = agora + 2800;
+        } else if (pontos > 19) {
+          estado = "vitoria";
+          pausado = false;
+          atualizarBotaoPausar();
+          lixeiraVisivel = false;
+          dicaVisivel = false;
+          clones = [];
+          playSound(sons.vitoria);
+          encerrarEm = agora + 2800;
+        }
+      } else if (estado === "fim" || estado === "vitoria") {
+        if (agora >= encerrarEm) {
+          estado = "instrucoes";
+        }
+      }
+
+      ctx.save();
+      if (!pausado && tempoRef < flashErroAte) {
+        const tremor = Math.sin(tempoRef * 0.08) * 3;
+        ctx.translate(tremor, 0);
+      }
+
+      ctx.clearRect(-10, -10, W + 20, H + 20);
+      ctx.fillStyle = "#1b2a1e";
+      ctx.fillRect(0, 0, W, H);
+
+      const bgAtual = imgs.bg[estado];
+      if (imagemPronta(bgAtual)) {
+        ctx.drawImage(bgAtual, 0, 0, W, H);
+      } else if (estado === "instrucoes") {
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 22px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("COLETA SELETIVA", W / 2, 120);
+        ctx.font = "15px sans-serif";
+        ctx.fillStyle = "#a5d6a7";
+        ctx.fillText("Toque na tela ou aperte ESPAÇO", W / 2, 160);
+        ctx.textAlign = "left";
+      }
+
+      if (estado === "instrucoes") {
+        if (imagemPronta(imgs.botao)) {
+          const escala = Math.floor(agora / 300) % 2 === 1 ? 1.08 : 1.0;
+          const bw = imgs.botao.naturalWidth * escala;
+          const bh = imgs.botao.naturalHeight * escala;
+          const [bx, by] = scratchToCanvas(36, 28, bw, bh, [147.5 * escala, -121.4 * escala]);
+          ctx.drawImage(imgs.botao, bx, by, bw, bh);
+        }
+        ctx.fillStyle = "rgba(15, 25, 18, 0.88)";
+        roundRect(W - 155, 8, 147, 28, 8);
+        ctx.fill();
+        ctx.fillStyle = "#ffe082";
+        ctx.font = "bold 13px sans-serif";
+        ctx.fillText("🏆 Recorde: " + recorde + " / 20", W - 146, 27);
+      } else if (estado === "jogo") {
+        if (lixeiraVisivel) {
+          const imgL = imgs.lixeira[lixeiraFantasia - 1];
+          const lw = (imgL && imgL.naturalWidth) || 80;
+          const lh = (imgL && imgL.naturalHeight) || 84;
+          const [lx, ly] = scratchToCanvas(lixeiraX, lixeiraY, lw, lh, [40, 42]);
+          if (imagemPronta(imgL)) {
+            ctx.drawImage(imgL, lx, ly, lw, lh);
+          } else {
+            ctx.fillStyle = "#2e7d32";
+            ctx.fillRect(lx, ly, lw, lh);
+          }
+        }
+
+        for (const c of clones) {
+          const imgC = imgs.lixo[c.item - 1];
+          const cw = (imgC && imgC.naturalWidth) || 50;
+          const ch = (imgC && imgC.naturalHeight) || 50;
+          const [cx, cy] = scratchToCanvas(c.x, c.y, cw, ch);
+          if (imagemPronta(imgC)) {
+            ctx.drawImage(imgC, cx, cy, cw, ch);
+          } else {
+            ctx.fillStyle = "#fbc02d";
+            ctx.fillRect(cx, cy, cw, ch);
+          }
+        }
+
+        if (dicaVisivel) {
+          const imgD = imgs.dica[dicaFantasia - 1];
+          const dw = (imgD && imgD.naturalWidth) || 440;
+          const dh = (imgD && imgD.naturalHeight) || 60;
+          const [dx, dy] = scratchToCanvas(0, 95, dw, dh, [220, 30]);
+          if (imagemPronta(imgD)) {
+            ctx.drawImage(imgD, dx, dy, dw, dh);
+          }
+        }
+
+        const proxFeedbacks = [];
+        for (const fb of feedbacks) {
+          const elapsed = tempoRef - fb.criadoEm;
+          if (elapsed < 750) {
+            const yAtual = fb.y - (elapsed * 0.04);
+            const alpha = 1 - (elapsed / 750);
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, alpha);
+            ctx.font = "bold 16px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillStyle = fb.cor;
+            ctx.fillText(fb.texto, fb.x, yAtual);
+            ctx.restore();
+            proxFeedbacks.push(fb);
+          }
+        }
+        feedbacks = proxFeedbacks;
+
+        ctx.fillStyle = "rgba(15, 25, 18, 0.88)";
+        roundRect(8, 8, 140, 28, 8);
+        ctx.fill();
+        roundRect(8, 40, 140, 28, 8);
+        ctx.fill();
+        roundRect(W - 148, 8, 140, 28, 8);
+        ctx.fill();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 14px sans-serif";
+        ctx.fillText("♻️ Pontos: " + pontos + "/20", 16, 27);
+        ctx.fillText("❤️ Vidas: " + vidas, 16, 59);
+
+        ctx.fillStyle = "#ffe082";
+        ctx.font = "bold 13px sans-serif";
+        ctx.fillText("🏆 Recorde: " + recorde, W - 140, 27);
+
+        if (pausado) {
+          ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+          ctx.fillRect(0, 0, W, H);
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "bold 26px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("PAUSADO", W / 2, H / 2 - 6);
+          ctx.font = "14px sans-serif";
+          ctx.fillStyle = "#cfd8dc";
+          ctx.fillText("Toque em Continuar ou aperte P", W / 2, H / 2 + 22);
+          ctx.textAlign = "left";
+        }
+      }
+
+      ctx.restore();
+      requestAnimationFrame(loop);
+    }
+
+    focarCanvas();
+    requestAnimationFrame(loop);
+    </script>
+    </body>
+    </html>
+    """
+
+    html_jogo = (
+        html_template
+        .replace("__ASSETS_URI__", json.dumps(assets_uri))
+        .replace("__NOME_JOGADOR__", json.dumps(nome_jogador))
+    )
+
+    components.html(html_jogo, height=495, scrolling=False)
+
+with col_ranking:
+    st.markdown('<div class="ranking-card">', unsafe_allow_html=True)
+    st.subheader("🏆 Ranking de Jogadores")
+    st.caption("Registre sua pontuação após finalizar a partida:")
+
+    with st.form("form_ranking", clear_on_submit=False):
+        r_col1, r_col2 = st.columns([1.2, 1])
+        with r_col1:
+            pontos_registrar = st.number_input(
+                "Pontos feitos",
+                min_value=0,
+                max_value=20,
+                value=20,
+                step=1,
+            )
+        with r_col2:
+            st.write("")
+            st.write("")
+            enviado = st.form_submit_button("💾 Salvar", use_container_width=True)
+
+        if enviado:
+            salvar_no_ranking(nome_jogador, pontos_registrar)
+            st.success(f"Pontuação de **{nome_jogador}** salva!")
+
+    ranking_atual = carregar_ranking()
+
+    if not ranking_atual:
+        st.info("Nenhuma pontuação registrada ainda. Seja o primeiro a entrar no pódio!")
+    else:
+        medalhas = ["🥇", "🥈", "🥉"]
+        for idx, item in enumerate(ranking_atual[:10]):
+            pos = medalhas[idx] if idx < 3 else f"#{idx + 1}"
+            cor_fundo = (
+                "rgba(255, 215, 0, 0.15)"
+                if idx == 0
+                else "rgba(255, 255, 255, 0.05)"
+            )
+            st.markdown(
+                f"""
+                <div style="
+                    display:flex;
+                    justify-content:space-between;
+                    align-items:center;
+                    background:{cor_fundo};
+                    padding:8px 12px;
+                    border-radius:8px;
+                    margin-bottom:6px;
+                    border: 1px solid rgba(255,255,255,0.08);
+                ">
+                    <span><b>{pos} {item['nome']}</b> <small style="color:#a5d6a7;">({item['data']})</small></span>
+                    <span style="font-weight:bold; color:#ffe082;">{item['pontos']} pts</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("</div>", unsafe_allow_html=True)
