@@ -1,5 +1,10 @@
 [
   {
+    "nome": "Jogador",
+    "pontos": 4,
+    "data": "23/11 22:25"
+  },
+  {
     "nome": "Luan",
     "pontos": 2,
     "data": "23/11 22:05"
