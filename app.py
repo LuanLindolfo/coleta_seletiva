@@ -1,5 +1,4 @@
 import base64
-import hashlib
 import json
 import mimetypes
 import os
@@ -15,21 +14,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-CHAVE_SECRETA = "coleta_seletiva_anti_fraude_2026"
 PASTA_RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_ASSETS = os.path.join(PASTA_RAIZ, "dependencias")
 ARQUIVO_RANKING_LOCAL = os.path.join(PASTA_RAIZ, "ranking.json")
 
-# URL oficial do seu app no Streamlit Cloud
-APP_URL = st.secrets.get("APP_URL", "https://coletaseletiva1.streamlit.app")
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
 GITHUB_FILE_PATH = "ranking.json"
-
-
-def gerar_assinatura(nome: str, pontos: int, partida_id: str) -> str:
-    bruto = f"{nome}|{pontos}|{partida_id}|{CHAVE_SECRETA}"
-    return hashlib.sha256(bruto.encode("utf-8")).hexdigest()[:16]
 
 
 def ler_ranking_github():
@@ -37,13 +28,14 @@ def ler_ranking_github():
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return None, None, "GITHUB_TOKEN ou GITHUB_REPO não configurados nos Secrets."
 
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}?t={int(datetime.now().timestamp())}"
     req = urllib.request.Request(
         url,
         headers={
             "Authorization": f"Bearer {GITHUB_TOKEN}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
+            "Cache-Control": "no-cache",
         },
     )
     try:
@@ -51,131 +43,15 @@ def ler_ranking_github():
             payload = json.loads(resp.read().decode("utf-8"))
             conteudo_decodificado = base64.b64decode(payload["content"]).decode("utf-8")
             dados = json.loads(conteudo_decodificado)
-            return sorted(dados, key=lambda x: (-x["pontos"], x["data"])), payload["sha"], None
+            return sorted(dados, key=lambda x: (-int(x.get("pontos", 0)), x.get("data", ""))), payload["sha"], None
     except urllib.error.HTTPError as e:
         detalhe = e.read().decode("utf-8", errors="ignore")
         if e.code == 404:
             return [], None, None
-        return None, None, f"Erro HTTP {e.code} ao ler GitHub: {detalhe}"
+        return None, None, f"Erro HTTP {e.code}: {detalhe}"
     except Exception as e:
-        return None, None, f"Erro de conexão ao ler GitHub: {e}"
+        return None, None, f"Erro de conexão: {e}"
 
-
-def gravar_ranking_github(novo_ranking, sha_atual):
-    """Atualiza o ranking.json no GitHub. Retorna (sucesso_bool, erro_str)."""
-    if not GITHUB_TOKEN or not GITHUB_REPO:
-        return False, "Secrets do GitHub ausentes."
-
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
-    conteudo_str = json.dumps(novo_ranking, ensure_ascii=False, indent=2)
-    conteudo_b64 = base64.b64encode(conteudo_str.encode("utf-8")).decode("utf-8")
-
-    body = {
-        "message": "chore: atualiza pódio Coleta Seletiva",
-        "content": conteudo_b64,
-    }
-    if sha_atual:
-        body["sha"] = sha_atual
-
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        method="PUT",
-        headers={
-            "Authorization": f"Bearer {GITHUB_TOKEN}",
-            "Accept": "application/vnd.github+json",
-            "Content-Type": "application/json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status in (200, 201), None
-    except urllib.error.HTTPError as e:
-        detalhe = e.read().decode("utf-8", errors="ignore")
-        return False, f"Erro HTTP {e.code} ao gravar no GitHub: {detalhe}"
-    except Exception as e:
-        return False, f"Erro ao gravar no GitHub: {e}"
-
-
-def carregar_ranking():
-    dados_gh, _, _ = ler_ranking_github()
-    if dados_gh is not None:
-        return dados_gh
-
-    if not os.path.exists(ARQUIVO_RANKING_LOCAL):
-        return []
-    try:
-        with open(ARQUIVO_RANKING_LOCAL, "r", encoding="utf-8") as f:
-            dados = json.load(f)
-            return sorted(dados, key=lambda x: (-x["pontos"], x["data"]))
-    except Exception:
-        return []
-
-
-def salvar_no_ranking(nome: str, pontos: int, partida_id: str):
-    nome_limpo = (nome or "Jogador").strip()[:20] or "Jogador"
-    pontos_int = max(0, min(20, int(pontos)))
-
-    dados_gh, sha_gh, erro_leitura = ler_ranking_github()
-    ranking = dados_gh if dados_gh is not None else carregar_ranking()
-
-    if any(item.get("partida_id") == partida_id for item in ranking):
-        return True, None
-
-    ranking.append(
-        {
-            "nome": nome_limpo,
-            "pontos": pontos_int,
-            "data": datetime.now().strftime("%d/%m %H:%M"),
-            "partida_id": partida_id,
-        }
-    )
-    ranking = sorted(ranking, key=lambda x: (-x["pontos"], x["data"]))[:15]
-
-    if dados_gh is not None:
-        salvou, erro_gravacao = gravar_ranking_github(ranking, sha_gh)
-        if salvou:
-            return True, None
-        return False, erro_gravacao
-
-    try:
-        with open(ARQUIVO_RANKING_LOCAL, "w", encoding="utf-8") as f:
-            json.dump(ranking, f, ensure_ascii=False, indent=2)
-        return True, erro_leitura
-    except Exception as e:
-        return False, str(e)
-
-
-# --- CAPTURA DA PONTUAÇÃO ENVIADA PELO JOGO ---
-params = st.query_params
-if "p_pts" in params and "p_nome" in params and "p_id" in params and "p_sig" in params:
-    try:
-        p_nome = str(params["p_nome"])
-        p_pts = int(params["p_pts"])
-        p_id = str(params["p_id"])
-        p_sig = str(params["p_sig"])
-
-        st.session_state["jogador_atual"] = p_nome
-
-        if gerar_assinatura(p_nome, p_pts, p_id) == p_sig:
-            ok, erro_msg = salvar_no_ranking(p_nome, p_pts, p_id)
-            if ok:
-                st.session_state["ultimo_registro"] = (
-                    f"🏆 Pontuação de **{p_nome}** ({p_pts} pts) salva no pódio!"
-                )
-            if erro_msg:
-                st.session_state["erro_registro"] = f"⚠️ Aviso GitHub: {erro_msg}"
-        else:
-            st.session_state["erro_registro"] = "⚠️ Assinatura inválida. Pontuação não registrada."
-    except Exception as e:
-        st.session_state["erro_registro"] = f"⚠️ Erro ao processar pontuação: {e}"
-    finally:
-        st.query_params.clear()
-        st.rerun()
-
-if "jogador_atual" not in st.session_state:
-    st.session_state["jogador_atual"] = "Jogador"
 
 # --- CSS PERSONALIZADO ---
 st.markdown(
@@ -235,11 +111,6 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
-if "ultimo_registro" in st.session_state:
-    st.success(st.session_state.pop("ultimo_registro"))
-if "erro_registro" in st.session_state:
-    st.error(st.session_state.pop("erro_registro"))
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.markdown('<div class="bin-card" style="background:#1565c0;">1 · PAPEL</div>', unsafe_allow_html=True)
@@ -326,17 +197,11 @@ col_jogo, col_ranking = st.columns([1.45, 1], gap="large")
 with col_jogo:
     nome_jogador = st.text_input(
         "👤 Seu nome antes de começar a jogar:",
-        key="jogador_atual",
+        value="Jogador",
         max_chars=20,
         placeholder="Digite seu apelido...",
     )
-
-    partida_id_atual = datetime.now().strftime("%Y%m%d%H%M%S%f")
     nome_seguro = (nome_jogador or "Jogador").strip()[:20] or "Jogador"
-    assinaturas_validas = {
-        str(pts): gerar_assinatura(nome_seguro, pts, partida_id_atual)
-        for pts in range(0, 21)
-    }
 
     html_template = """
     <!DOCTYPE html>
@@ -381,28 +246,22 @@ with col_jogo:
         touch-action: none;
         display: block;
       }
-      #link-salvar-podio {
+      #banner-status-podio {
         display: none;
         position: absolute;
         bottom: 112px;
         left: 50%;
         transform: translateX(-50%);
-        background: linear-gradient(135deg, #ffd54f, #ffb300);
-        color: #1b1b1b;
-        font-weight: 800;
-        font-size: 14px;
-        padding: 12px 20px;
+        background: rgba(15, 30, 20, 0.95);
+        color: #ffe082;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 10px 18px;
         border-radius: 12px;
-        text-decoration: none;
-        box-shadow: 0 6px 20px rgba(0,0,0,0.6);
-        border: 2px solid #ffffff;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.65);
+        border: 2px solid #4caf50;
         z-index: 20;
         white-space: nowrap;
-        animation: pulsar 0.9s infinite alternate;
-      }
-      @keyframes pulsar {
-        from { transform: translateX(-50%) scale(1); }
-        to { transform: translateX(-50%) scale(1.06); }
       }
       .lixeiras-touch {
         display: grid;
@@ -472,7 +331,7 @@ with col_jogo:
     <div class="game-wrapper">
       <canvas id="game" width="480" height="360" tabindex="0"></canvas>
 
-      <a id="link-salvar-podio" target="_top" rel="noopener" href="#">🏆 Registrar no Pódio</a>
+      <div id="banner-status-podio">⏳ Salvando no pódio...</div>
 
       <div class="lixeiras-touch">
         <button type="button" class="btn-lixeira b1 ativa" data-tipo="1">1·Papel</button>
@@ -500,15 +359,14 @@ with col_jogo:
     const btnIniciarTop = document.getElementById("btn-iniciar-top");
     const btnMute = document.getElementById("btn-mute");
     const botoesLixeira = document.querySelectorAll(".btn-lixeira");
-    const linkSalvarPodio = document.getElementById("link-salvar-podio");
+    const bannerPodio = document.getElementById("banner-status-podio");
 
     const W = 480, H = 360;
     const URIS = __ASSETS_URI__;
     const STORAGE_KEY = "coleta_seletiva_recorde_v2";
-    const APP_URL = __APP_URL__;
     const NOME_JOGADOR = __NOME_JOGADOR__;
-    const PARTIDA_ID = __PARTIDA_ID__;
-    const ASSINATURAS = __ASSINATURAS__;
+    const GH_TOKEN = __GH_TOKEN__;
+    const GH_REPO = __GH_REPO__;
 
     function focarCanvas() {
       canvas.focus();
@@ -530,19 +388,104 @@ with col_jogo:
       } catch (e) {}
     }
 
-    function prepararLinkRegistro(ptsFinal) {
+    // Encode UTF-8 para Base64
+    function utf8ToB64(str) {
+      const bytes = new TextEncoder().encode(str);
+      let binString = "";
+      for (let i = 0; i < bytes.length; i++) {
+        binString += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binString);
+    }
+
+    function b64ToUtf8(b64) {
+      const binString = atob(b64.replace(/\\s/g, ""));
+      const bytes = new Uint8Array(binString.length);
+      for (let i = 0; i < binString.length; i++) {
+        bytes[i] = binString.charCodeAt(i);
+      }
+      return new TextDecoder().decode(bytes);
+    }
+
+    // Gravação automática direta no GitHub via fetch (funciona 100% dentro do iframe!)
+    async function registrarAutomaticamenteNoGitHub(ptsFinal) {
       const pts = Math.max(0, Math.min(20, ptsFinal));
-      const sig = ASSINATURAS[String(pts)] || "";
+      bannerPodio.style.display = "block";
+      bannerPodio.style.borderColor = "#ffb300";
+      bannerPodio.style.color = "#ffe082";
+      bannerPodio.textContent = "⏳ Salvando " + pts + " pts no Pódio...";
 
-      const destino = new URL(APP_URL);
-      destino.searchParams.set("p_nome", NOME_JOGADOR);
-      destino.searchParams.set("p_pts", String(pts));
-      destino.searchParams.set("p_id", PARTIDA_ID);
-      destino.searchParams.set("p_sig", sig);
+      if (!GH_TOKEN || !GH_REPO) {
+        bannerPodio.style.borderColor = "#ff5252";
+        bannerPodio.textContent = "⚠️ Configure GITHUB_TOKEN e GITHUB_REPO nos Secrets";
+        return;
+      }
 
-      linkSalvarPodio.href = destino.toString();
-      linkSalvarPodio.textContent = "🏆 Salvar " + pts + " pts no Pódio!";
-      linkSalvarPodio.style.display = "block";
+      const apiUrl = "https://api.github.com/repos/" + GH_REPO + "/contents/ranking.json";
+      const headers = {
+        "Authorization": "Bearer " + GH_TOKEN,
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28"
+      };
+
+      try {
+        let listaAtual = [];
+        let shaAtual = null;
+
+        const respGet = await fetch(apiUrl + "?t=" + Date.now(), { headers, cache: "no-store" });
+        if (respGet.ok) {
+          const dataGet = await respGet.json();
+          shaAtual = dataGet.sha;
+          const textoJson = b64ToUtf8(dataGet.content);
+          listaAtual = JSON.parse(textoJson);
+          if (!Array.isArray(listaAtual)) listaAtual = [];
+        }
+
+        const agora = new Date();
+        const dia = String(agora.getDate()).padStart(2, "0");
+        const mes = String(agora.getMonth() + 1).padStart(2, "0");
+        const hora = String(agora.getHours()).padStart(2, "0");
+        const min = String(agora.getMinutes()).padStart(2, "0");
+
+        listaAtual.push({
+          nome: NOME_JOGADOR,
+          pontos: pts,
+          data: dia + "/" + mes + " " + hora + ":" + min
+        });
+
+        listaAtual.sort((a, b) => Number(b.pontos) - Number(a.pontos));
+        const top15 = listaAtual.slice(0, 15);
+
+        const bodyPut = {
+          message: "chore: registra " + pts + " pts de " + NOME_JOGADOR,
+          content: utf8ToB64(JSON.stringify(top15, null, 2))
+        };
+        if (shaAtual) bodyPut.sha = shaAtual;
+
+        const respPut = await fetch(apiUrl, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify(bodyPut)
+        });
+
+        if (respPut.ok) {
+          bannerPodio.style.borderColor = "#69f0ae";
+          bannerPodio.style.color = "#69f0ae";
+          bannerPodio.textContent = "✅ " + pts + " pts salvos! Clique em Atualizar Pódio →";
+        } else {
+          const errTxt = await respPut.text();
+          bannerPodio.style.borderColor = "#ff5252";
+          bannerPodio.style.color = "#ff8a80";
+          bannerPodio.textContent = "⚠️ Erro GitHub (" + respPut.status + ")";
+          console.error("Erro GitHub:", errTxt);
+        }
+      } catch (err) {
+        bannerPodio.style.borderColor = "#ff5252";
+        bannerPodio.style.color = "#ff8a80";
+        bannerPodio.textContent = "⚠️ Falha de rede ao salvar";
+        console.error(err);
+      }
     }
 
     function loadImg(src) {
@@ -725,7 +668,7 @@ with col_jogo:
       const agora = performance.now();
       estado = "jogo";
       pausado = false;
-      linkSalvarPodio.style.display = "none";
+      bannerPodio.style.display = "none";
       atualizarBotaoPausar();
       pontos = 0;
       vidas = 5;
@@ -867,7 +810,7 @@ with col_jogo:
           dicaVisivel = false;
           clones = [];
           playSound(sons.fim);
-          prepararLinkRegistro(pontos);
+          registrarAutomaticamenteNoGitHub(pontos);
         } else if (pontos > 19) {
           estado = "vitoria";
           pausado = false;
@@ -876,7 +819,7 @@ with col_jogo:
           dicaVisivel = false;
           clones = [];
           playSound(sons.vitoria);
-          prepararLinkRegistro(pontos);
+          registrarAutomaticamenteNoGitHub(pontos);
         }
       }
 
@@ -1018,10 +961,9 @@ with col_jogo:
     html_jogo = (
         html_template
         .replace("__ASSETS_URI__", json.dumps(assets_uri))
-        .replace("__APP_URL__", json.dumps(APP_URL))
         .replace("__NOME_JOGADOR__", json.dumps(nome_seguro))
-        .replace("__PARTIDA_ID__", json.dumps(partida_id_atual))
-        .replace("__ASSINATURAS__", json.dumps(assinaturas_validas))
+        .replace("__GH_TOKEN__", json.dumps(GITHUB_TOKEN))
+        .replace("__GH_REPO__", json.dumps(GITHUB_REPO))
     )
 
     if hasattr(st, "iframe"):
@@ -1032,15 +974,20 @@ with col_jogo:
 
 with col_ranking:
     st.markdown('<div class="ranking-card">', unsafe_allow_html=True)
-    st.subheader("🏆 Pódio Oficial")
+    r_top1, r_top2 = st.columns([1.6, 1])
+    with r_top1:
+        st.subheader("🏆 Pódio Oficial")
+    with r_top2:
+        if st.button("🔄 Atualizar", use_container_width=True):
+            st.rerun()
 
     dados_gh, _, erro_gh = ler_ranking_github()
     if dados_gh is not None:
-        st.caption("✅ Conectado ao GitHub.")
+        st.caption("✅ Conectado ao GitHub • Salvamento automático ao fim da partida.")
     else:
         st.warning(f"⚠️ Modo local: {erro_gh}")
 
-    ranking_atual = dados_gh if dados_gh is not None else carregar_ranking()
+    ranking_atual = dados_gh if dados_gh is not None else []
 
     if not ranking_atual:
         st.info("Nenhuma partida finalizada ainda. Jogue para inaugurar o pódio!")
