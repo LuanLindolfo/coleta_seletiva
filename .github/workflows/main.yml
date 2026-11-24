@@ -1,0 +1,34 @@
+name: Ordenar e Validar Pódio
+
+on:
+  push:
+    paths:
+      - 'ranking.json'
+
+permissions:
+  contents: write
+
+jobs:
+  ordenar-podio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ordenar ranking.json
+        run: |
+          python3 -c '
+          import json
+          with open("ranking.json", "r", encoding="utf-8") as f:
+              dados = json.load(f)
+          # Garante pontuacao valida (0 a 20) e ordena do maior para o menor
+          validos = [d for d in dados if 0 <= int(d.get("pontos", 0)) <= 20]
+          validos.sort(key=lambda x: (-int(x["pontos"]), x.get("data", "")))
+          with open("ranking.json", "w", encoding="utf-8") as f:
+              json.dump(validos[:15], f, ensure_ascii=False, indent=2)
+          '
+
+      - name: Commit se houve reordenação
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git diff --quiet ranking.json || (git add ranking.json && git commit -m "chore: ordena pódio oficial" && git push)
