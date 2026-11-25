@@ -11,6 +11,11 @@
   },
   {
     "nome": "Jogador",
+    "pontos": 1,
+    "data": "25/11 10:22"
+  },
+  {
+    "nome": "Jogador",
     "pontos": 0,
     "data": "24/11 09:29"
   }
