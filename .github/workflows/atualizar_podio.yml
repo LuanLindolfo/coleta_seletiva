@@ -15,20 +15,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ordenar ranking.json
+      - name: Validar e Ordenar Top 5 (ranking.json)
         run: |
           python3 -c '
           import json
+
           with open("ranking.json", "r", encoding="utf-8") as f:
               dados = json.load(f)
-          validos = [d for d in dados if 0 <= int(d.get("pontos", 0)) <= 20]
-          validos.sort(key=lambda x: (-int(x["pontos"]), x.get("data", "")))
+
+          if not isinstance(dados, list):
+              dados = []
+
+          validos = []
+          for d in dados:
+              pts = int(d.get("pontos", -1))
+              fase = int(d.get("fase", 1))
+              nome = str(d.get("nome", "Jogador")).strip()[:20] or "Jogador"
+              data = str(d.get("data", ""))
+
+              if 0 <= pts <= 40 and 1 <= fase <= 5:
+                  validos.append({
+                      "nome": nome,
+                      "pontos": pts,
+                      "fase": fase,
+                      "data": data
+                  })
+
+          # Ordena por pontos (maior), fase (maior) e data (mais antiga primeiro no empate)
+          validos.sort(key=lambda x: (-x["pontos"], -x["fase"], x["data"]))
+
           with open("ranking.json", "w", encoding="utf-8") as f:
-              json.dump(validos[:15], f, ensure_ascii=False, indent=2)
+              json.dump(validos[:5], f, ensure_ascii=False, indent=2)
           '
 
-      - name: Commit se houve reordenação
+      - name: Commit se houve reordenação ou limpeza
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git diff --quiet ranking.json || (git add ranking.json && git commit -m "chore: ordena pódio oficial" && git push)
+          git diff --quiet ranking.json || (git add ranking.json && git commit -m "chore: valida e ordena Top 5 oficial" && git push)
