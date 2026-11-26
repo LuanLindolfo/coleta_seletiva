@@ -178,30 +178,30 @@ st.markdown(
         background: rgba(255, 255, 255, 0.06);
         border: 1px solid rgba(129, 199, 132, 0.3);
         border-radius: 16px;
-        padding: 16px 22px;
-        margin-bottom: 14px;
+        padding: 14px 20px;
+        margin-bottom: 12px;
         text-align: center;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
     }
     .header-box h1 {
         margin: 0;
-        font-size: 2.0rem;
+        font-size: 1.9rem;
         color: #a5d6a7;
     }
     .header-box p {
-        margin: 6px 0 0 0;
+        margin: 4px 0 0 0;
         color: #dce775;
-        font-size: 0.92rem;
+        font-size: 0.9rem;
     }
     .bin-card {
         border-radius: 10px;
-        padding: 8px 6px;
+        padding: 7px 6px;
         text-align: center;
         font-weight: bold;
         font-size: 0.85rem;
         color: white;
         box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-        margin-bottom: 10px;
+        margin-bottom: 8px;
     }
     .ranking-card {
         background: rgba(20, 32, 24, 0.85);
@@ -296,7 +296,6 @@ assets_uri = {
         asset_to_data_uri("7f683ab17ac6b7aac94b7af86074fbaa.svg"),
         asset_to_data_uri("a7b7b55ac7696e64f8dfcd5102922329.svg"),
     ],
-    # Novas imagens dos itens e power-ups
     "extras": {
         "coringa": asset_to_data_uri("coringa.png"),
         "vida": asset_to_data_uri("kit_restauracao.png"),
@@ -323,7 +322,7 @@ elif arquivos_em_falta:
 aba_jogar, aba_guia = st.tabs(["🎮 Jogar & Pódio Oficial", "📚 Enciclopédia: Aprenda Jogando"])
 
 with aba_jogar:
-    col_jogo, col_ranking = st.columns([1.45, 1], gap="large")
+    col_jogo, col_ranking = st.columns([1.75, 1], gap="large")
 
     with col_jogo:
         c_nome, c_modo = st.columns([1.1, 1])
@@ -377,7 +376,7 @@ with aba_jogar:
           .game-wrapper {
             position: relative;
             width: 100%;
-            max-width: 530px;
+            max-width: 680px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -397,7 +396,7 @@ with aba_jogar:
           #banner-status-podio {
             display: none;
             position: absolute;
-            bottom: 112px;
+            bottom: 120px;
             left: 50%;
             transform: translateX(-50%);
             background: rgba(15, 30, 20, 0.96);
@@ -414,16 +413,16 @@ with aba_jogar:
           .lixeiras-touch {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
-            gap: 6px;
+            gap: 8px;
             width: 100%;
             margin-top: 10px;
           }
           .btn-lixeira {
             border: 2px solid transparent;
             border-radius: 10px;
-            padding: 10px 2px;
+            padding: 11px 2px;
             font-weight: 700;
-            font-size: 12px;
+            font-size: 13px;
             color: #fff;
             cursor: pointer;
             transition: transform 0.08s ease, border-color 0.15s ease;
@@ -465,7 +464,7 @@ with aba_jogar:
             color: #e8f5e9;
             border: 1px solid #4caf50;
             border-radius: 8px;
-            padding: 6px 11px;
+            padding: 6px 12px;
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
@@ -542,27 +541,6 @@ with aba_jogar:
         const STORAGE_KEY = "coleta_seletiva_recorde_v4_" + MODO_JOGO;
         const BADGES_KEY = "coleta_seletiva_badges_v1";
 
-        const NOMES_LIXEIRAS = {
-          1: "Azul (Papel)",
-          2: "Vermelha (Plástico)",
-          3: "Verde (Vidro)",
-          4: "Amarela (Metal)",
-          5: "Marrom (Orgânico)"
-        };
-
-        const NOMES_ITENS_BASE = {
-          1: "Jornal / Folha de Papel",
-          2: "Garrafa Plástica",
-          3: "Pote de Vidro",
-          4: "Lata de Alumínio",
-          5: "Resto de Maçã",
-          6: "Caixa de Papelão",
-          7: "Copo Descartável",
-          8: "Garrafa de Vidro",
-          9: "Lata de Conserva",
-          10: "Casca de Banana"
-        };
-
         const FASES_CONFIG = [
           { numero: 1, nome: "Aquecimento", desc: "Todos os materiais • Ritmo inicial", minPts: 0, velBase: 2.0, spawnMin: 1400, spawnMax: 2050, ventoAmp: 0, maxSim: 2 },
           { numero: 2, nome: "Ritmo Urbano", desc: "Queda mais rápida + Itens especiais!", minPts: 5, velBase: 2.45, spawnMin: 1150, spawnMax: 1700, ventoAmp: 0, maxSim: 3 },
@@ -597,10 +575,6 @@ with aba_jogar:
             localStorage.setItem(BADGES_KEY, JSON.stringify(badgesDesbloqueadas));
           } catch (e) {}
           renderizarBadges();
-          const b = LISTA_BADGES.find((x) => x.id === id);
-          if (b) {
-            mostrarCartaoEducativo("🏅 Conquista: " + b.label, "#ffd54f", 2600);
-          }
         }
 
         function renderizarBadges() {
@@ -770,7 +744,6 @@ with aba_jogar:
         let congeladoAte = 0;
 
         let bannerFase = null;
-        let cartaoEdu = null;
 
         let lixeiraX = 0;
         let lixeiraY = -135;
@@ -788,14 +761,6 @@ with aba_jogar:
         let ultimoAumentoVel = 0;
 
         const teclas = {};
-
-        function mostrarCartaoEducativo(texto, cor = "#ffe082", duracao = 2400) {
-          cartaoEdu = {
-            texto,
-            cor,
-            ate: performance.now() + duracao
-          };
-        }
 
         function selecionarLixeira(tipo) {
           if (estado === "jogo" && performance.now() < congeladoAte) return;
@@ -868,7 +833,6 @@ with aba_jogar:
             if (freezeAte > 0) freezeAte += delta;
             if (congeladoAte > 0) congeladoAte += delta;
             if (bannerFase) bannerFase.ate += delta;
-            if (cartaoEdu) cartaoEdu.ate += delta;
             for (const fb of feedbacks) fb.criadoEm += delta;
             pausado = false;
           }
@@ -936,13 +900,12 @@ with aba_jogar:
           }
         }
 
-        function dispararErro(tipoCorreto, px = W / 2, py = H / 2, motivoEdu = null) {
+        function dispararErro(tipoCorreto, px = W / 2, py = H / 2) {
           const agora = performance.now();
 
           if (escudoAtivo) {
             escudoAtivo = false;
-            adicionarFeedback(px, py, "🛡️ Escudo Bloqueou!", "#4fc3f7");
-            mostrarCartaoEducativo("🛡️ Escudo Ambiental evitou a perda de vida!", "#4fc3f7", 2000);
+            adicionarFeedback(px, py, "🛡️ Escudo!", "#4fc3f7");
             playSound(sons.acerto);
             return;
           }
@@ -967,10 +930,6 @@ with aba_jogar:
             dicaVisivel = true;
             dicaAte = agora + 2500;
           }
-
-          if (motivoEdu) {
-            mostrarCartaoEducativo(motivoEdu, "#ff8a80", 2600);
-          }
         }
 
         function gerarEntidadeSpawn() {
@@ -993,15 +952,11 @@ with aba_jogar:
             return { x, y: 175, kind: "bomba", subtipo: "pilha", tipo: 0, faseOnda, fatorPeso: 0.7 };
           }
 
-          // 3) Itens Especiais / Compostos / Saco Combo (18% de chance)
-          if (r < 0.39) {
-            const subR = Math.random();
-            if (subR < 0.42) {
+          // 3) Itens Especiais: Caixa de Pizza Engordurada ou Saco Combo (16% de chance)
+          if (r < 0.37) {
+            if (Math.random() < 0.55) {
               // Caixa de pizza engordurada -> Orgânico (tipo 5)
               return { x, y: 175, kind: "especial", subtipo: "pizza", tipo: 5, faseOnda, fatorPeso: 1.2 };
-            } else if (subR < 0.76) {
-              // Garrafa PET cheia -> Plástico (tipo 2)
-              return { x, y: 175, kind: "especial", subtipo: "pet_cheia", tipo: 2, faseOnda, fatorPeso: 0.85 };
             } else {
               // Saco de Reciclagem
               const tipoSaco = Math.floor(Math.random() * 5) + 1;
@@ -1041,16 +996,13 @@ with aba_jogar:
 
           if (subtipo === "ima") {
             imaAte = agora + 5000;
-            adicionarFeedback(px, py, "🧲 Ímã Seletivo (5s)!", "#64b5f6");
-            mostrarCartaoEducativo("🧲 Ímã ativo! Atraindo lixos da cor selecionada.", "#64b5f6", 2000);
+            adicionarFeedback(px, py, "🧲 Ímã (5s)!", "#64b5f6");
           } else if (subtipo === "freeze") {
             freezeAte = agora + 6000;
             adicionarFeedback(px, py, "⏳ Eco-Freeze (6s)!", "#80deea");
-            mostrarCartaoEducativo("⏳ Eco-Freeze! Velocidade reduzida pela metade.", "#80deea", 2000);
           } else if (subtipo === "escudo") {
             escudoAtivo = true;
             adicionarFeedback(px, py, "🛡️ Escudo Ativo!", "#4fc3f7");
-            mostrarCartaoEducativo("🛡️ Escudo Ambiental! Protege contra o próximo erro.", "#4fc3f7", 2000);
           } else if (subtipo === "vida") {
             vidas = Math.min(5, vidas + 1);
             adicionarFeedback(px, py, "❤️ +1 Vida!", "#ff8a80");
@@ -1064,8 +1016,7 @@ with aba_jogar:
                 convertidos++;
               }
             }
-            adicionarFeedback(px, py, "✨ Coringa (" + convertidos + " itens)!", "#ffd54f");
-            mostrarCartaoEducativo("✨ Transformador! Todos os itens viraram " + NOMES_LIXEIRAS[lixeiraFantasia], "#ffd54f", 2200);
+            adicionarFeedback(px, py, "✨ Coringa (" + convertidos + ")!", "#ffd54f");
           }
         }
 
@@ -1098,7 +1049,6 @@ with aba_jogar:
           selecionarLixeira(1);
           lixeiraVisivel = true;
           dicaVisivel = false;
-          cartaoEdu = null;
           clones = [];
           feedbacks = [];
           flashErroAte = 0;
@@ -1154,18 +1104,15 @@ with aba_jogar:
           return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
         }
 
-        // Desenha suas novas imagens PNG (coringa, kit_restauracao, ima_seletivo, escudo_ambiental, eco_freeze, caixa_pizza_realista)
         function desenharEntidadeCustom(c, cx, cy, cw, ch) {
           ctx.save();
           const centroX = cx + cw / 2;
           const centroY = cy + ch / 2;
           const raio = cw * 0.48;
 
-          // Verifica se existe uma imagem PNG dedicada para este item/power-up
           const imgExtra = imgs.extras[c.subtipo];
           if (imagemPronta(imgExtra)) {
             if (c.kind === "powerup") {
-              // Halo luminoso suave para destacar power-ups no cenário
               ctx.beginPath();
               ctx.arc(centroX, centroY, raio + 2, 0, Math.PI * 2);
               ctx.fillStyle = "rgba(64, 196, 255, 0.25)";
@@ -1179,7 +1126,6 @@ with aba_jogar:
             return;
           }
 
-          // Fallback gráfico para itens sem arquivo PNG próprio (pilha, garrafa cheia, saco)
           if (c.kind === "bomba") {
             ctx.fillStyle = "#212121";
             ctx.beginPath();
@@ -1193,7 +1139,7 @@ with aba_jogar:
             ctx.textBaseline = "middle";
             ctx.fillText("🔋", centroX, centroY + 1);
           } else if (c.kind === "especial") {
-            ctx.fillStyle = c.subtipo === "pizza" ? "#4e342e" : "#b71c1c";
+            ctx.fillStyle = "#4e342e";
             ctx.beginPath();
             ctx.arc(centroX, centroY, raio * 0.9, 0, Math.PI * 2);
             ctx.fill();
@@ -1203,7 +1149,7 @@ with aba_jogar:
             ctx.font = "22px sans-serif";
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillText(c.subtipo === "pizza" ? "🍕" : "🧴", centroX, centroY + 1);
+            ctx.fillText("🍕", centroX, centroY + 1);
           } else if (c.kind === "saco") {
             const coresTipo = { 1: "#1565c0", 2: "#c62828", 3: "#2e7d32", 4: "#f9a825", 5: "#5d4037" };
             ctx.fillStyle = coresTipo[c.tipo] || "#37474f";
@@ -1324,7 +1270,7 @@ with aba_jogar:
                 } else if (c.kind === "bomba") {
                   if (escudoAtivo) {
                     escudoAtivo = false;
-                    adicionarFeedback(px, py, "🛡️ Pilha Bloqueada!", "#4fc3f7");
+                    adicionarFeedback(px, py, "🛡️ Bloqueada!", "#4fc3f7");
                   } else {
                     comboAtual = 0;
                     errosNaPartida += 1;
@@ -1338,36 +1284,21 @@ with aba_jogar:
                       vidas = Math.max(0, vidas - 2);
                       adicionarFeedback(px, py, "🔋 -2 ❤️ e Congelado!", "#ff5252");
                     }
-                    mostrarCartaoEducativo("⚠️ Pilhas e baterias são tóxicas! Desvie delas!", "#ff5252", 2600);
                   }
                 } else if (c.kind === "saco") {
                   abrirSacoNoAr(c);
                 } else if (c.kind === "especial") {
                   if (lixeiraFantasia === c.tipo) {
-                    if (c.subtipo === "pizza") {
-                      desbloquearBadge("pizza_expert");
-                      registrarAcerto(2, 5, px, py, "🍕 +2 Orgânico!");
-                      mostrarCartaoEducativo("🍕 Caixa com gordura não recicla papel → Lixeira Marrom!", "#a5d6a7", 2300);
-                    } else {
-                      registrarAcerto(2, 2, px, py, "🧴 +2 Bônus PET!");
-                    }
+                    desbloquearBadge("pizza_expert");
+                    registrarAcerto(2, 5, px, py, "🍕 +2 Orgânico!");
                   } else {
-                    const msgPizza = c.subtipo === "pizza"
-                      ? "🍕 Caixa de pizza engordurada vai no Orgânico (Marrom)!"
-                      : "🧴 Garrafa PET vai na Lixeira Vermelha (Plástico)!";
-                    dispararErro(c.tipo, px, py, msgPizza);
+                    dispararErro(c.tipo, px, py);
                   }
                 } else {
                   if (lixeiraFantasia === c.tipo) {
                     registrarAcerto(1, c.tipo, px, py);
                   } else {
-                    const nomeItem = NOMES_ITENS_BASE[c.item] || "Item";
-                    dispararErro(
-                      c.tipo,
-                      px,
-                      py,
-                      "❌ " + nomeItem + " → Lixeira " + NOMES_LIXEIRAS[c.tipo] + "!"
-                    );
+                    dispararErro(c.tipo, px, py);
                   }
                 }
                 continue;
@@ -1375,15 +1306,7 @@ with aba_jogar:
 
               if (c.y < -170) {
                 if (c.kind === "base" || c.kind === "especial") {
-                  const nomeItem = c.kind === "especial"
-                    ? (c.subtipo === "pizza" ? "Caixa de Pizza" : "Garrafa PET")
-                    : (NOMES_ITENS_BASE[c.item] || "Resíduo");
-                  dispararErro(
-                    c.tipo,
-                    cx + cw / 2,
-                    H - 30,
-                    "⚠️ Caiu no chão! " + nomeItem + " → " + NOMES_LIXEIRAS[c.tipo]
-                  );
+                  dispararErro(c.tipo, cx + cw / 2, H - 30);
                 }
                 continue;
               }
@@ -1394,7 +1317,6 @@ with aba_jogar:
 
             if (dicaVisivel && agora >= dicaAte) dicaVisivel = false;
             if (bannerFase && agora >= bannerFase.ate) bannerFase = null;
-            if (cartaoEdu && agora >= cartaoEdu.ate) cartaoEdu = null;
 
             if (MODO_JOGO !== "tempo" && vidas < 1) {
               encerrarPartida(false);
@@ -1511,21 +1433,6 @@ with aba_jogar:
               }
             }
 
-            if (cartaoEdu && tempoRef < cartaoEdu.ate) {
-              ctx.save();
-              ctx.fillStyle = "rgba(10, 22, 14, 0.92)";
-              roundRect(16, 74, W - 32, 28, 8);
-              ctx.fill();
-              ctx.strokeStyle = cartaoEdu.cor;
-              ctx.lineWidth = 1.5;
-              ctx.stroke();
-              ctx.fillStyle = cartaoEdu.cor;
-              ctx.font = "bold 12px sans-serif";
-              ctx.textAlign = "center";
-              ctx.fillText(cartaoEdu.texto, W / 2, 92);
-              ctx.restore();
-            }
-
             if (bannerFase && tempoRef < bannerFase.ate) {
               ctx.save();
               ctx.fillStyle = "rgba(12, 28, 18, 0.92)";
@@ -1634,10 +1541,10 @@ with aba_jogar:
         )
 
         if hasattr(st, "iframe"):
-            st.iframe(html_jogo, height=535)
+            st.iframe(html_jogo, height=640)
         else:
             import streamlit.components.v1 as components
-            components.html(html_jogo, height=535, scrolling=False)
+            components.html(html_jogo, height=640, scrolling=False)
 
     # ==========================================================================
     # COLUNA DIREITA: TOP 5 OFICIAL
@@ -1716,7 +1623,7 @@ with aba_guia:
     st.table(
         [
             {"Ícone": "🔵 1 · Papel", "Exemplos no Jogo": "Jornal, folhas, caixa de papelão limpa", "Decomposição na Natureza": "3 a 6 meses", "Observação": "Deve estar seco e sem gordura."},
-            {"Ícone": "🔴 2 · Plástico", "Exemplos no Jogo": "Garrafa PET (+2 pts se cheia!), copo descartável", "Decomposição na Natureza": "Mais de 400 anos", "Observação": "Amasse garrafas para reduzir volume."},
+            {"Ícone": "🔴 2 · Plástico", "Exemplos no Jogo": "Garrafas plásticas e copos descartáveis", "Decomposição na Natureza": "Mais de 400 anos", "Observação": "Amasse embalagens para reduzir volume."},
             {"Ícone": "🟢 3 · Vidro", "Exemplos no Jogo": "Garrafas e potes de conserva", "Decomposição na Natureza": "Indeterminado (+4.000 anos)", "Observação": "100% reciclável infinitas vezes."},
             {"Ícone": "🟡 4 · Metal", "Exemplos no Jogo": "Latas de alumínio e aço", "Decomposição na Natureza": "100 a 500 anos", "Observação": "Reciclar alumínio economiza 95% de energia."},
             {"Ícone": "🟤 5 · Orgânico", "Exemplos no Jogo": "Maçã, casca de banana, 🍕 Caixa de Pizza com gordura", "Decomposição na Natureza": "2 semanas a 1 ano", "Observação": "Vira adubo rico via compostagem."},
