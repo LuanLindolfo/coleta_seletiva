@@ -233,7 +233,7 @@ c4.markdown('<div class="bin-card" style="background:#f9a825; color:#1b1b1b;">4 
 c5.markdown('<div class="bin-card" style="background:#5d4037;">5 · ORGÂNICO</div>', unsafe_allow_html=True)
 
 # ==============================================================================
-# CARREGAMENTO DE ASSETS EM BASE64 (INCLUINDO AS NOVAS IMAGENS .PNG)
+# CARREGAMENTO DE ASSETS EM BASE64
 # ==============================================================================
 arquivos_em_falta = []
 
@@ -303,6 +303,7 @@ assets_uri = {
         "escudo": asset_to_data_uri("escudo_ambiental.png"),
         "freeze": asset_to_data_uri("eco_freeze.png"),
         "pizza": asset_to_data_uri("caixa_pizza_realista.png"),
+        "saco": asset_to_data_uri("saco_reciclagem.png"),
     },
     "som_acerto": asset_to_data_uri("cfc50a412483f6aadb83adeff596052e.wav"),
     "som_erro": asset_to_data_uri("768bd6a764ab62a6a6764e4147c3e615.wav"),
@@ -689,6 +690,7 @@ with aba_jogar:
             escudo: loadImg(URIS.extras.escudo),
             freeze: loadImg(URIS.extras.freeze),
             pizza: loadImg(URIS.extras.pizza),
+            saco: loadImg(URIS.extras.saco),
           }
         };
 
@@ -952,7 +954,7 @@ with aba_jogar:
             return { x, y: 175, kind: "bomba", subtipo: "pilha", tipo: 0, faseOnda, fatorPeso: 0.7 };
           }
 
-          // 3) Itens Especiais: Caixa de Pizza Engordurada ou Saco Combo (16% de chance)
+          // 3) Itens Especiais: Caixa de Pizza Engordurada ou Saco de Reciclagem (16% de chance)
           if (r < 0.37) {
             if (Math.random() < 0.55) {
               // Caixa de pizza engordurada -> Orgânico (tipo 5)
@@ -971,23 +973,29 @@ with aba_jogar:
           return { x, y: 175, kind: "base", item, tipo, faseOnda, fatorPeso };
         }
 
+        // Ao coletar o saco de reciclagem, lança os 3 itens lá no topo da tela para dar tempo de pegar!
         function abrirSacoNoAr(saco) {
           playSound(sons.acerto);
-          const [sx, sy] = scratchToCanvas(saco.x, saco.y, 48, 48);
-          adicionarFeedback(sx + 24, sy, "🛍️ +3 Itens!", "#81c784");
-          const offsets = [-55, 0, 55];
+          const [sx, sy] = scratchToCanvas(saco.x, saco.y, 52, 52);
+          adicionarFeedback(sx + 26, sy, "🛍️ +3 Itens no topo!", "#81c784");
+
+          const posicoesX = [-125, 0, 125];
+          const alturasY = [175, 205, 235]; // Escalonados no topo para dar tempo de reagir e pegar todos
+
           for (let i = 0; i < 3; i++) {
             const itemDoTipo = saco.tipo + (Math.random() < 0.5 ? 0 : 5);
             clones.push({
-              x: Math.max(-195, Math.min(195, saco.x + offsets[i])),
-              y: saco.y + (i === 1 ? 12 : 0),
+              x: posicoesX[i],
+              y: alturasY[i],
               kind: "base",
               item: itemDoTipo,
               tipo: saco.tipo,
               faseOnda: Math.random() * Math.PI * 2,
-              fatorPeso: 0.9
+              fatorPeso: 0.85
             });
           }
+          // Adia levemente o próximo spawn automático para não congestionar a tela
+          proximoSpawn = Math.max(proximoSpawn, performance.now() + 1400);
         }
 
         function aplicarPowerUp(subtipo, px, py) {
@@ -1109,6 +1117,7 @@ with aba_jogar:
           const centroX = cx + cw / 2;
           const centroY = cy + ch / 2;
           const raio = cw * 0.48;
+          const coresTipo = { 1: "#1565c0", 2: "#c62828", 3: "#2e7d32", 4: "#f9a825", 5: "#5d4037" };
 
           const imgExtra = imgs.extras[c.subtipo];
           if (imagemPronta(imgExtra)) {
@@ -1122,6 +1131,23 @@ with aba_jogar:
               ctx.stroke();
             }
             ctx.drawImage(imgExtra, cx, cy, cw, ch);
+
+            // Se for o saco de reciclagem, mostra um indicador da cor do material interno
+            if (c.kind === "saco") {
+              ctx.beginPath();
+              ctx.arc(cx + cw - 9, cy + ch - 9, 8, 0, Math.PI * 2);
+              ctx.fillStyle = coresTipo[c.tipo] || "#2e7d32";
+              ctx.fill();
+              ctx.lineWidth = 1.5;
+              ctx.strokeStyle = "#ffffff";
+              ctx.stroke();
+              ctx.fillStyle = c.tipo === 4 ? "#1b1b1b" : "#ffffff";
+              ctx.font = "bold 10px sans-serif";
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.fillText(String(c.tipo), cx + cw - 9, cy + ch - 8.5);
+            }
+
             ctx.restore();
             return;
           }
@@ -1151,7 +1177,6 @@ with aba_jogar:
             ctx.textBaseline = "middle";
             ctx.fillText("🍕", centroX, centroY + 1);
           } else if (c.kind === "saco") {
-            const coresTipo = { 1: "#1565c0", 2: "#c62828", 3: "#2e7d32", 4: "#f9a825", 5: "#5d4037" };
             ctx.fillStyle = coresTipo[c.tipo] || "#37474f";
             ctx.beginPath();
             ctx.arc(centroX, centroY, raio * 0.9, 0, Math.PI * 2);
@@ -1637,7 +1662,7 @@ with aba_guia:
             """
             * **🍕 Caixa de Pizza Engordurada:** Apesar de ser feita de papelão, a gordura contamina a reciclagem do papel. Jogue na lixeira **Marrom (Orgânico)** para ganhar **+2 pts**.
             * **🔋 Pilha Tóxica (Perigo!):** Metais pesados contaminam o solo. **Desvie dela!** Se cair na lixeira comum, tira **2 vidas** (ou 5s) e congela sua lixeira por 2 segundos.
-            * **🛍️ Saco de Reciclagem:** Ao coletar, abre no ar e espalha **3 itens** do mesmo material.
+            * **🛍️ Saco de Reciclagem:** Ao coletar, lança **3 itens** do mesmo material no topo da tela para você coletar.
             """
         )
     with c_pwr:
