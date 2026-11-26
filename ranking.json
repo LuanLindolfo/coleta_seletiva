@@ -16,22 +16,13 @@
   },
   {
     "nome": "Jogador",
+    "pontos": 1,
+    "fase": 1,
+    "data": "26/11 09:53"
+  },
+  {
+    "nome": "Jogador",
     "pontos": 0,
     "data": "24/11 09:29"
-  },
-  {
-    "nome": "Jogador",
-    "pontos": 0,
-    "data": "26/11 08:24"
-  },
-  {
-    "nome": "Jogador",
-    "pontos": 0,
-    "data": "26/11 08:25"
-  },
-  {
-    "nome": "Jogador",
-    "pontos": 0,
-    "data": "26/11 09:31"
   }
 ]
