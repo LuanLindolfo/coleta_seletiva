@@ -8,7 +8,7 @@ from datetime import datetime
 import streamlit as st
 
 st.set_page_config(
-    page_title="♻️ Coleta Seletiva",
+    page_title="♻️ Coleta Seletiva Pro",
     page_icon="♻️",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -16,15 +16,17 @@ st.set_page_config(
 
 PASTA_RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_ASSETS = os.path.join(PASTA_RAIZ, "dependencias")
-ARQUIVO_RANKING_LOCAL = os.path.join(PASTA_RAIZ, "ranking.json")
 
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
 GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
 GITHUB_FILE_PATH = "ranking.json"
 
 
+# ==============================================================================
+# CAMADA DE PERSISTÊNCIA SEGURA NO PYTHON (O TOKEN NUNCA SAI DO SERVIDOR)
+# ==============================================================================
 def ler_ranking_github():
-    """Lê o ranking.json da API do GitHub e retorna os 5 melhores. Retorna (lista, sha, erro_str)."""
+    """Lê o ranking.json da API do GitHub e retorna os 5 melhores únicos."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return None, None, "GITHUB_TOKEN ou GITHUB_REPO não configurados nos Secrets."
 
@@ -63,7 +65,110 @@ def ler_ranking_github():
         return None, None, f"Erro de conexão: {e}"
 
 
-# --- CSS PERSONALIZADO ---
+def salvar_pontuacao_github(nome: str, pontos: int, fase: int, modo: str):
+    """Valida, deduplica por jogador e grava o Top 5 diretamente pelo Python."""
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return False, "Secrets do GitHub não configurados."
+
+    # Validação de integridade no servidor
+    modos_validos = {"campanha", "infinito", "tempo"}
+    if modo not in modos_validos:
+        modo = "campanha"
+
+    limite_pts = 40 if modo == "campanha" else 999
+    if not (0 <= pontos <= limite_pts and 1 <= fase <= 5):
+        return False, "Pontuação fora dos limites permitidos."
+
+    nome_limpo = (nome or "Jogador").strip()[:20] or "Jogador"
+    dados_atuais, sha_atual, erro = ler_ranking_github()
+    if dados_atuais is None:
+        return False, erro or "Falha ao ler ranking atual."
+
+    agora_str = datetime.now().strftime("%d/%m %H:%M")
+    dados_atuais.append(
+        {
+            "nome": nome_limpo,
+            "pontos": int(pontos),
+            "fase": int(fase),
+            "modo": modo,
+            "data": agora_str,
+        }
+    )
+
+    dados_atuais.sort(
+        key=lambda x: (
+            -int(x.get("pontos", 0)),
+            -int(x.get("fase", 1)),
+            x.get("data", ""),
+        )
+    )
+
+    # Deduplicação: mantém apenas o maior recorde de cada jogador
+    unicos = []
+    vistos = set()
+    for item in dados_atuais:
+        chave = str(item.get("nome", "Jogador")).strip().lower()
+        if chave not in vistos:
+            vistos.add(chave)
+            unicos.append(item)
+
+    top5 = unicos[:5]
+    conteudo_b64 = base64.b64encode(
+        json.dumps(top5, ensure_ascii=False, indent=2).encode("utf-8")
+    ).decode("utf-8")
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+    body = {
+        "message": f"chore: registra {pontos} pts de {nome_limpo} ({modo})",
+        "content": conteudo_b64,
+    }
+    if sha_atual:
+        body["sha"] = sha_atual
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        method="PUT",
+        headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status in (200, 201):
+                return True, f"✅ {pontos} pts salvos no Top 5 com segurança!"
+            return False, f"Status inesperado: {resp.status}"
+    except Exception as e:
+        return False, f"Erro ao salvar no GitHub: {e}"
+
+
+# Intercepta envio seguro vindo do jogo via Query Params
+if "save_score" in st.query_params:
+    try:
+        qp = st.query_params
+        token_partida = qp.get("sid", "")
+        if token_partida and token_partida != st.session_state.get("ultimo_sid_salvo"):
+            st.session_state["ultimo_sid_salvo"] = token_partida
+            ok, msg = salvar_pontuacao_github(
+                nome=qp.get("nome", "Jogador"),
+                pontos=int(qp.get("pts", "0")),
+                fase=int(qp.get("fase", "1")),
+                modo=qp.get("modo", "campanha"),
+            )
+            st.session_state["flash_podio"] = (ok, msg)
+    except Exception as exc:
+        st.session_state["flash_podio"] = (False, f"Erro ao processar placar: {exc}")
+    finally:
+        st.query_params.clear()
+        st.rerun()
+
+
+# ==============================================================================
+# ESTILO E CABEÇALHO
+# ==============================================================================
 st.markdown(
     """
     <style>
@@ -75,20 +180,20 @@ st.markdown(
         background: rgba(255, 255, 255, 0.06);
         border: 1px solid rgba(129, 199, 132, 0.3);
         border-radius: 16px;
-        padding: 18px 24px;
-        margin-bottom: 18px;
+        padding: 16px 22px;
+        margin-bottom: 14px;
         text-align: center;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
     }
     .header-box h1 {
         margin: 0;
-        font-size: 2.1rem;
+        font-size: 2.0rem;
         color: #a5d6a7;
     }
     .header-box p {
         margin: 6px 0 0 0;
         color: #dce775;
-        font-size: 0.95rem;
+        font-size: 0.92rem;
     }
     .bin-card {
         border-radius: 10px;
@@ -115,8 +220,8 @@ st.markdown(
 st.markdown(
     """
     <div class="header-box">
-        <h1>♻️ Desafio da Coleta Seletiva</h1>
-        <p>📱 <b>Mobile:</b> Arraste o dedo para mover e toque nos botões das lixeiras • 💻 <b>PC:</b> Setas / A-D e teclas 1 a 5</p>
+        <h1>♻️ Desafio da Coleta Seletiva — Edição Evoluída</h1>
+        <p>📱 <b>Mobile:</b> Arraste e toque nas lixeiras • 💻 <b>PC:</b> Setas / A-D e teclas 1 a 5 • <b>P:</b> Pausar • <b>M:</b> Som</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -129,12 +234,13 @@ c3.markdown('<div class="bin-card" style="background:#2e7d32;">3 · VIDRO</div>'
 c4.markdown('<div class="bin-card" style="background:#f9a825; color:#1b1b1b;">4 · METAL</div>', unsafe_allow_html=True)
 c5.markdown('<div class="bin-card" style="background:#5d4037;">5 · ORGÂNICO</div>', unsafe_allow_html=True)
 
+# ==============================================================================
+# CARREGAMENTO DE ASSETS EM BASE64
+# ==============================================================================
 arquivos_em_falta = []
-arquivos_carregados = 0
 
 
 def asset_to_data_uri(nome_arquivo):
-    global arquivos_carregados
     caminho = os.path.join(PASTA_ASSETS, nome_arquivo)
     if not os.path.exists(caminho):
         arquivos_em_falta.append(nome_arquivo)
@@ -149,7 +255,6 @@ def asset_to_data_uri(nome_arquivo):
 
     with open(caminho, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("utf-8")
-    arquivos_carregados += 1
     return f"data:{mime};base64,{b64}"
 
 
@@ -202,980 +307,1428 @@ if not os.path.isdir(PASTA_ASSETS):
 elif arquivos_em_falta:
     st.warning(f"Arquivos ausentes ({len(arquivos_em_falta)}): " + ", ".join(arquivos_em_falta))
 
-col_jogo, col_ranking = st.columns([1.45, 1], gap="large")
 
-with col_jogo:
-    nome_jogador = st.text_input(
-        "👤 Seu nome antes de começar a jogar:",
-        value="Jogador",
-        max_chars=20,
-        placeholder="Digite seu apelido...",
-    )
-    nome_seguro = (nome_jogador or "Jogador").strip()[:20] or "Jogador"
+# ==============================================================================
+# ABAS PRINCIPAIS: JOGO + PÓDIO | ENCICLOPÉDIA "APRENDA JOGANDO"
+# ==============================================================================
+aba_jogar, aba_guia = st.tabs(["🎮 Jogar & Pódio Oficial", "📚 Enciclopédia: Aprenda Jogando"])
 
-    html_template = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <style>
-      * {
-        box-sizing: border-box;
-        -webkit-tap-highlight-color: transparent;
-        user-select: none;
-      }
-      body {
-        margin: 0;
-        padding: 4px;
-        background: transparent;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-        touch-action: manipulation;
-        overflow: hidden;
-      }
-      .game-wrapper {
-        position: relative;
-        width: 100%;
-        max-width: 520px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-      }
-      canvas {
-        width: 100%;
-        height: auto;
-        aspect-ratio: 4 / 3;
-        border: 2px solid #4caf50;
-        border-radius: 14px;
-        background: #1b2a1e;
-        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-        outline: none;
-        touch-action: none;
-        display: block;
-      }
-      #banner-status-podio {
-        display: none;
-        position: absolute;
-        bottom: 112px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(15, 30, 20, 0.95);
-        color: #ffe082;
-        font-weight: 700;
-        font-size: 13px;
-        padding: 10px 18px;
-        border-radius: 12px;
-        box-shadow: 0 6px 20px rgba(0,0,0,0.65);
-        border: 2px solid #4caf50;
-        z-index: 20;
-        white-space: nowrap;
-      }
-      .lixeiras-touch {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 6px;
-        width: 100%;
-        margin-top: 10px;
-      }
-      .btn-lixeira {
-        border: 2px solid transparent;
-        border-radius: 10px;
-        padding: 10px 2px;
-        font-weight: 700;
-        font-size: 12px;
-        color: #fff;
-        cursor: pointer;
-        transition: transform 0.08s ease, border-color 0.15s ease;
-        text-align: center;
-        box-shadow: 0 3px 8px rgba(0,0,0,0.3);
-      }
-      .btn-lixeira:active {
-        transform: scale(0.94);
-      }
-      .btn-lixeira.ativa {
-        border-color: #ffffff;
-        transform: translateY(-3px);
-        box-shadow: 0 0 12px rgba(255, 255, 255, 0.65);
-      }
-      .b1 { background: #1565c0; }
-      .b2 { background: #c62828; }
-      .b3 { background: #2e7d32; }
-      .b4 { background: #f9a825; color: #1b1b1b; }
-      .b5 { background: #5d4037; }
+with aba_jogar:
+    col_jogo, col_ranking = st.columns([1.45, 1], gap="large")
 
-      .barra-inferior {
-        margin-top: 10px;
-        width: 100%;
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: space-between;
-        align-items: center;
-        gap: 8px;
-        font-size: 12px;
-        color: #c8e6c9;
-      }
-      .acoes {
-        display: flex;
-        gap: 6px;
-        flex-wrap: wrap;
-      }
-      .btn-mini {
-        background: #233327;
-        color: #e8f5e9;
-        border: 1px solid #4caf50;
-        border-radius: 8px;
-        padding: 7px 12px;
-        font-size: 12px;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      .btn-mini:active {
-        background: #354f3c;
-      }
-    </style>
-    </head>
-    <body>
-    <div class="game-wrapper">
-      <canvas id="game" width="480" height="360" tabindex="0"></canvas>
+    with col_jogo:
+        c_nome, c_modo = st.columns([1.1, 1])
+        with c_nome:
+            nome_jogador = st.text_input(
+                "👤 Seu apelido:",
+                value="Jogador",
+                max_chars=20,
+                placeholder="Digite seu apelido...",
+            )
+        with c_modo:
+            modo_label = st.selectbox(
+                "🕹️ Modo de Jogo:",
+                [
+                    "🚩 Campanha (5 Fases · 40 pts)",
+                    "♾️ Infinito (Arcade)",
+                    "⏱️ Contra o Relógio (60s)",
+                ],
+            )
 
-      <div id="banner-status-podio">⏳ Salvando no Top 5...</div>
+        nome_seguro = (nome_jogador or "Jogador").strip()[:20] or "Jogador"
+        modo_codigo = (
+            "campanha"
+            if "Campanha" in modo_label
+            else ("infinito" if "Infinito" in modo_label else "tempo")
+        )
 
-      <div class="lixeiras-touch">
-        <button type="button" class="btn-lixeira b1 ativa" data-tipo="1">1·Papel</button>
-        <button type="button" class="btn-lixeira b2" data-tipo="2">2·Plást.</button>
-        <button type="button" class="btn-lixeira b3" data-tipo="3">3·Vidro</button>
-        <button type="button" class="btn-lixeira b4" data-tipo="4">4·Metal</button>
-        <button type="button" class="btn-lixeira b5" data-tipo="5">5·Orgân.</button>
-      </div>
+        # HTML5 Canvas Game Engine (Zero tokens expostos!)
+        html_template = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <style>
+          * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+          }
+          body {
+            margin: 0;
+            padding: 4px;
+            background: transparent;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+            touch-action: manipulation;
+            overflow: hidden;
+          }
+          .game-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 530px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+          }
+          canvas {
+            width: 100%;
+            height: auto;
+            aspect-ratio: 4 / 3;
+            border: 2px solid #4caf50;
+            border-radius: 14px;
+            background: #1b2a1e;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+            outline: none;
+            touch-action: none;
+            display: block;
+          }
+          #banner-status-podio {
+            display: none;
+            position: absolute;
+            bottom: 112px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 30, 20, 0.96);
+            color: #ffe082;
+            font-weight: 700;
+            font-size: 13px;
+            padding: 10px 16px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.65);
+            border: 2px solid #4caf50;
+            z-index: 20;
+            white-space: nowrap;
+          }
+          .lixeiras-touch {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 6px;
+            width: 100%;
+            margin-top: 10px;
+          }
+          .btn-lixeira {
+            border: 2px solid transparent;
+            border-radius: 10px;
+            padding: 10px 2px;
+            font-weight: 700;
+            font-size: 12px;
+            color: #fff;
+            cursor: pointer;
+            transition: transform 0.08s ease, border-color 0.15s ease;
+            text-align: center;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+          }
+          .btn-lixeira:active {
+            transform: scale(0.94);
+          }
+          .btn-lixeira.ativa {
+            border-color: #ffffff;
+            transform: translateY(-3px);
+            box-shadow: 0 0 12px rgba(255, 255, 255, 0.65);
+          }
+          .b1 { background: #1565c0; }
+          .b2 { background: #c62828; }
+          .b3 { background: #2e7d32; }
+          .b4 { background: #f9a825; color: #1b1b1b; }
+          .b5 { background: #5d4037; }
 
-      <div class="barra-inferior">
-        <span id="status-foco">Toque na tela ou aperte ESPAÇO</span>
-        <div class="acoes">
-          <button class="btn-mini" id="btn-iniciar-top" type="button">▶ Jogar</button>
-          <button class="btn-mini" id="btn-pausar" type="button">⏸ Pausar</button>
-          <button class="btn-mini" id="btn-mute" type="button">🔊 Som</button>
+          .barra-inferior {
+            margin-top: 8px;
+            width: 100%;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #c8e6c9;
+          }
+          .acoes {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+          }
+          .btn-mini {
+            background: #233327;
+            color: #e8f5e9;
+            border: 1px solid #4caf50;
+            border-radius: 8px;
+            padding: 6px 11px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+          }
+          .btn-mini:active {
+            background: #354f3c;
+          }
+          .badges-strip {
+            margin-top: 8px;
+            width: 100%;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            justify-content: center;
+          }
+          .badge-pill {
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            color: #9e9e9e;
+          }
+          .badge-pill.unlocked {
+            background: rgba(76, 175, 80, 0.22);
+            border-color: #81c784;
+            color: #e8f5e9;
+            font-weight: 600;
+          }
+        </style>
+        </head>
+        <body>
+        <div class="game-wrapper">
+          <canvas id="game" width="480" height="360" tabindex="0"></canvas>
+
+          <div id="banner-status-podio">⏳ Enviando pontuação segura...</div>
+
+          <div class="lixeiras-touch">
+            <button type="button" class="btn-lixeira b1 ativa" data-tipo="1">1·Papel</button>
+            <button type="button" class="btn-lixeira b2" data-tipo="2">2·Plást.</button>
+            <button type="button" class="btn-lixeira b3" data-tipo="3">3·Vidro</button>
+            <button type="button" class="btn-lixeira b4" data-tipo="4">4·Metal</button>
+            <button type="button" class="btn-lixeira b5" data-tipo="5">5·Orgân.</button>
+          </div>
+
+          <div class="barra-inferior">
+            <span id="status-foco">Toque na tela ou aperte ESPAÇO</span>
+            <div class="acoes">
+              <button class="btn-mini" id="btn-iniciar-top" type="button">▶ Jogar</button>
+              <button class="btn-mini" id="btn-pausar" type="button">⏸ Pausar</button>
+              <button class="btn-mini" id="btn-mute" type="button">🔊 Som</button>
+            </div>
+          </div>
+
+          <div class="badges-strip" id="badges-container"></div>
         </div>
-      </div>
-    </div>
 
-    <script>
-    const canvas = document.getElementById("game");
-    const ctx = canvas.getContext("2d");
-    const statusFoco = document.getElementById("status-foco");
-    const btnPausar = document.getElementById("btn-pausar");
-    const btnIniciarTop = document.getElementById("btn-iniciar-top");
-    const btnMute = document.getElementById("btn-mute");
-    const botoesLixeira = document.querySelectorAll(".btn-lixeira");
-    const bannerPodio = document.getElementById("banner-status-podio");
+        <script>
+        const canvas = document.getElementById("game");
+        const ctx = canvas.getContext("2d");
+        const statusFoco = document.getElementById("status-foco");
+        const btnPausar = document.getElementById("btn-pausar");
+        const btnIniciarTop = document.getElementById("btn-iniciar-top");
+        const btnMute = document.getElementById("btn-mute");
+        const botoesLixeira = document.querySelectorAll(".btn-lixeira");
+        const bannerPodio = document.getElementById("banner-status-podio");
+        const badgesContainer = document.getElementById("badges-container");
 
-    const W = 480, H = 360;
-    const META_VITORIA = 40;
-    const URIS = __ASSETS_URI__;
-    const STORAGE_KEY = "coleta_seletiva_recorde_v3";
-    const NOME_JOGADOR = __NOME_JOGADOR__;
-    const GH_TOKEN = __GH_TOKEN__;
-    const GH_REPO = __GH_REPO__;
+        const W = 480, H = 360;
+        const META_CAMPANHA = 40;
+        const URIS = __ASSETS_URI__;
+        const NOME_JOGADOR = __NOME_JOGADOR__;
+        const MODO_JOGO = __MODO_JOGO__; // "campanha" | "infinito" | "tempo"
+        const STORAGE_KEY = "coleta_seletiva_recorde_v4_" + MODO_JOGO;
+        const BADGES_KEY = "coleta_seletiva_badges_v1";
 
-    // Configuração das 5 Fases (todos os 10 itens de lixo caem desde a Fase 1)
-    const FASES_CONFIG = [
-      {
-        numero: 1,
-        nome: "Aquecimento",
-        descricao: "Todos os tipos de lixo • Ritmo inicial",
-        minPts: 0,
-        velBase: 2.0,
-        spawnMin: 1450,
-        spawnMax: 2100,
-        ventoAmp: 0,
-        maxSimultaneos: 2
-      },
-      {
-        numero: 2,
-        nome: "Ritmo Urbano",
-        descricao: "Queda mais rápida!",
-        minPts: 5,
-        velBase: 2.5,
-        spawnMin: 1150,
-        spawnMax: 1750,
-        ventoAmp: 0,
-        maxSimultaneos: 3
-      },
-      {
-        numero: 3,
-        nome: "Fluxo Intenso",
-        descricao: "Mais resíduos caindo juntos!",
-        minPts: 12,
-        velBase: 2.9,
-        spawnMin: 850,
-        spawnMax: 1350,
-        ventoAmp: 0,
-        maxSimultaneos: 4
-      },
-      {
-        numero: 4,
-        nome: "Rajadas de Vento",
-        descricao: "Cuidado com o balanço no ar!",
-        minPts: 20,
-        velBase: 3.2,
-        spawnMin: 800,
-        spawnMax: 1250,
-        ventoAmp: 1.4,
-        maxSimultaneos: 4
-      },
-      {
-        numero: 5,
-        nome: "Desafio Máximo",
-        descricao: "Velocidade alta + vento forte!",
-        minPts: 30,
-        velBase: 3.7,
-        spawnMin: 680,
-        spawnMax: 1050,
-        ventoAmp: 2.1,
-        maxSimultaneos: 5
-      }
-    ];
+        const NOMES_LIXEIRAS = {
+          1: "Azul (Papel)",
+          2: "Vermelha (Plástico)",
+          3: "Verde (Vidro)",
+          4: "Amarela (Metal)",
+          5: "Marrom (Orgânico)"
+        };
 
-    function obterConfigFase(pts) {
-      let atual = FASES_CONFIG[0];
-      for (const f of FASES_CONFIG) {
-        if (pts >= f.minPts) atual = f;
-      }
-      return atual;
-    }
+        const NOMES_ITENS_BASE = {
+          1: "Jornal / Folha de Papel",
+          2: "Garrafa Plástica",
+          3: "Pote de Vidro",
+          4: "Lata de Alumínio",
+          5: "Resto de Maçã",
+          6: "Caixa de Papelão",
+          7: "Copo Descartável",
+          8: "Garrafa de Vidro",
+          9: "Lata de Conserva",
+          10: "Casca de Banana"
+        };
 
-    function focarCanvas() {
-      canvas.focus();
-      statusFoco.textContent = "Controles ativos (Toque ou Teclado)";
-    }
+        // 5 Fases Progressivas (Todos os 10 itens base caem desde a Fase 1!)
+        const FASES_CONFIG = [
+          { numero: 1, nome: "Aquecimento", desc: "Todos os materiais • Ritmo inicial", minPts: 0, velBase: 2.0, spawnMin: 1400, spawnMax: 2050, ventoAmp: 0, maxSim: 2 },
+          { numero: 2, nome: "Ritmo Urbano", desc: "Queda mais rápida + Itens especiais!", minPts: 5, velBase: 2.45, spawnMin: 1150, spawnMax: 1700, ventoAmp: 0, maxSim: 3 },
+          { numero: 3, nome: "Fluxo Intenso", desc: "Mais resíduos e pilhas tóxicas!", minPts: 12, velBase: 2.85, spawnMin: 880, spawnMax: 1380, ventoAmp: 0, maxSim: 4 },
+          { numero: 4, nome: "Rajadas de Vento", desc: "Itens balançam no ar!", minPts: 20, velBase: 3.15, spawnMin: 820, spawnMax: 1250, ventoAmp: 1.35, maxSim: 4 },
+          { numero: 5, nome: "Desafio Máximo", desc: "Velocidade alta + vento forte!", minPts: 30, velBase: 3.6, spawnMin: 700, spawnMax: 1080, ventoAmp: 2.0, maxSim: 5 }
+        ];
 
-    function lerRecorde() {
-      try {
-        const val = parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
-        return Number.isNaN(val) ? 0 : Math.max(0, val);
-      } catch (e) {
-        return 0;
-      }
-    }
+        const LISTA_BADGES = [
+          { id: "mestre_vidro", label: "🟢 Mestre do Vidro (10 acertos)" },
+          { id: "combo_3x", label: "🔥 Combo 3x (10 seguidos)" },
+          { id: "pizza_expert", label: "🍕 Sem Engano na Pizza" },
+          { id: "sobrevivente", label: "🌪️ Sobrevivente da Ventania" },
+          { id: "precisao_100", label: "🎯 100% Precisão (Campanha)" },
+          { id: "campeao", label: "👑 Campeão 40 pts" }
+        ];
 
-    function salvarRecorde(novoRecorde) {
-      try {
-        localStorage.setItem(STORAGE_KEY, String(novoRecorde));
-      } catch (e) {}
-    }
-
-    function utf8ToB64(str) {
-      const bytes = new TextEncoder().encode(str);
-      let binString = "";
-      for (let i = 0; i < bytes.length; i++) {
-        binString += String.fromCharCode(bytes[i]);
-      }
-      return btoa(binString);
-    }
-
-    function b64ToUtf8(b64) {
-      const binString = atob(b64.replace(/\\s/g, ""));
-      const bytes = new Uint8Array(binString.length);
-      for (let i = 0; i < binString.length; i++) {
-        bytes[i] = binString.charCodeAt(i);
-      }
-      return new TextDecoder().decode(bytes);
-    }
-
-    // Gravação automática mantendo apenas o TOP 5 no ranking.json
-    async function registrarAutomaticamenteNoGitHub(ptsFinal, faseFinal) {
-      const pts = Math.max(0, Math.min(META_VITORIA, ptsFinal));
-      const faseAlcancada = Math.max(1, Math.min(5, faseFinal));
-
-      bannerPodio.style.display = "block";
-      bannerPodio.style.borderColor = "#ffb300";
-      bannerPodio.style.color = "#ffe082";
-      bannerPodio.textContent = "⏳ Salvando " + pts + " pts (Fase " + faseAlcancada + ") no Top 5...";
-
-      if (!GH_TOKEN || !GH_REPO) {
-        bannerPodio.style.borderColor = "#ff5252";
-        bannerPodio.textContent = "⚠️ Configure GITHUB_TOKEN e GITHUB_REPO nos Secrets";
-        return;
-      }
-
-      const apiUrl = "https://api.github.com/repos/" + GH_REPO + "/contents/ranking.json";
-      const headers = {
-        "Authorization": "Bearer " + GH_TOKEN,
-        "Accept": "application/vnd.github+json",
-        "Content-Type": "application/json",
-        "X-GitHub-Api-Version": "2022-11-28"
-      };
-
-      try {
-        let listaAtual = [];
-        let shaAtual = null;
-
-        const respGet = await fetch(apiUrl + "?t=" + Date.now(), { headers, cache: "no-store" });
-        if (respGet.ok) {
-          const dataGet = await respGet.json();
-          shaAtual = dataGet.sha;
-          const textoJson = b64ToUtf8(dataGet.content);
-          listaAtual = JSON.parse(textoJson);
-          if (!Array.isArray(listaAtual)) listaAtual = [];
+        function carregarBadges() {
+          try {
+            return JSON.parse(localStorage.getItem(BADGES_KEY) || "{}");
+          } catch (e) {
+            return {};
+          }
         }
 
-        const agora = new Date();
-        const dia = String(agora.getDate()).padStart(2, "0");
-        const mes = String(agora.getMonth() + 1).padStart(2, "0");
-        const hora = String(agora.getHours()).padStart(2, "0");
-        const min = String(agora.getMinutes()).padStart(2, "0");
+        let badgesDesbloqueadas = carregarBadges();
 
-        listaAtual.push({
-          nome: NOME_JOGADOR,
-          pontos: pts,
-          fase: faseAlcancada,
-          data: dia + "/" + mes + " " + hora + ":" + min
-        });
+        function desbloquearBadge(id) {
+          if (badgesDesbloqueadas[id]) return;
+          badgesDesbloqueadas[id] = true;
+          try {
+            localStorage.setItem(BADGES_KEY, JSON.stringify(badgesDesbloqueadas));
+          } catch (e) {}
+          renderizarBadges();
+          const b = LISTA_BADGES.find((x) => x.id === id);
+          if (b) {
+            mostrarCartaoEducativo("🏅 Conquista: " + b.label, "#ffd54f", 2600);
+          }
+        }
 
-        // Ordena por pontos (desc), fase (desc) e mantém estritamente os 5 melhores
-        listaAtual.sort((a, b) => {
-          const diffPts = Number(b.pontos || 0) - Number(a.pontos || 0);
-          if (diffPts !== 0) return diffPts;
-          return Number(b.fase || 1) - Number(a.fase || 1);
-        });
-        const top5 = listaAtual.slice(0, 5);
+        function renderizarBadges() {
+          badgesContainer.innerHTML = "";
+          for (const b of LISTA_BADGES) {
+            const span = document.createElement("span");
+            const ok = Boolean(badgesDesbloqueadas[b.id]);
+            span.className = "badge-pill" + (ok ? " unlocked" : "");
+            span.textContent = ok ? b.label : "🔒 " + b.label.split("(")[0].trim();
+            badgesContainer.appendChild(span);
+          }
+        }
+        renderizarBadges();
 
-        const bodyPut = {
-          message: "chore: atualiza Top 5 (" + NOME_JOGADOR + " - " + pts + " pts)",
-          content: utf8ToB64(JSON.stringify(top5, null, 2))
-        };
-        if (shaAtual) bodyPut.sha = shaAtual;
+        function obterConfigFase(pts) {
+          let atual = FASES_CONFIG[0];
+          for (const f of FASES_CONFIG) {
+            if (pts >= f.minPts) atual = f;
+          }
+          return atual;
+        }
 
-        const respPut = await fetch(apiUrl, {
-          method: "PUT",
-          headers,
-          body: JSON.stringify(bodyPut)
-        });
+        function focarCanvas() {
+          canvas.focus();
+          statusFoco.textContent = "Controles ativos (Toque ou Teclado)";
+        }
 
-        if (respPut.ok) {
+        function lerRecorde() {
+          try {
+            const val = parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
+            return Number.isNaN(val) ? 0 : Math.max(0, val);
+          } catch (e) {
+            return 0;
+          }
+        }
+
+        function salvarRecorde(novoRecorde) {
+          try {
+            localStorage.setItem(STORAGE_KEY, String(novoRecorde));
+          } catch (e) {}
+        }
+
+        // Envio seguro ao Python do Streamlit via navegação do frame pai (Zero token no cliente!)
+        function enviarPlacarSeguroParaPython(ptsFinal, faseFinal) {
+          const pts = Math.max(0, Math.round(ptsFinal));
+          const faseAlcancada = Math.max(1, Math.min(5, faseFinal));
+
+          bannerPodio.style.display = "block";
           bannerPodio.style.borderColor = "#69f0ae";
           bannerPodio.style.color = "#69f0ae";
-          bannerPodio.textContent = "✅ " + pts + " pts registrados! Clique em Atualizar →";
-        } else {
-          const errTxt = await respPut.text();
-          bannerPodio.style.borderColor = "#ff5252";
-          bannerPodio.style.color = "#ff8a80";
-          bannerPodio.textContent = "⚠️ Erro GitHub (" + respPut.status + ")";
-          console.error("Erro GitHub:", errTxt);
-        }
-      } catch (err) {
-        bannerPodio.style.borderColor = "#ff5252";
-        bannerPodio.style.color = "#ff8a80";
-        bannerPodio.textContent = "⚠️ Falha de rede ao salvar";
-        console.error(err);
-      }
-    }
+          bannerPodio.textContent = "⏳ Registrando " + pts + " pts no Top 5...";
 
-    function loadImg(src) {
-      const img = new Image();
-      if (src) img.src = src;
-      return img;
-    }
-
-    function loadAudio(src) {
-      if (!src) return null;
-      return new Audio(src);
-    }
-
-    let mudo = false;
-    function alternarMute() {
-      mudo = !mudo;
-      btnMute.textContent = mudo ? "🔇 Mudo" : "🔊 Som";
-      focarCanvas();
-    }
-    btnMute.addEventListener("click", alternarMute);
-
-    function playSound(aud) {
-      if (!aud || mudo) return;
-      try {
-        aud.currentTime = 0;
-        aud.play().catch(() => {});
-      } catch (e) {}
-    }
-
-    const imgs = {
-      bg: {
-        instrucoes: loadImg(URIS.bg_instrucoes),
-        jogo: loadImg(URIS.bg_jogo),
-        fim: loadImg(URIS.bg_fim),
-        vitoria: loadImg(URIS.bg_vitoria),
-      },
-      botao: loadImg(URIS.botao_iniciar),
-      lixeira: URIS.lixeira.map(loadImg),
-      lixo: URIS.lixo.map(loadImg),
-      dica: URIS.dica.map(loadImg),
-    };
-
-    const sons = {
-      acerto: loadAudio(URIS.som_acerto),
-      erro: loadAudio(URIS.som_erro),
-      fim: loadAudio(URIS.som_fim),
-      vitoria: loadAudio(URIS.som_vitoria),
-    };
-
-    function scratchToCanvas(x, y, w, h, rotCenter = null) {
-      if (rotCenter) {
-        return [W / 2 + x - rotCenter[0], H / 2 - y - rotCenter[1]];
-      }
-      return [W / 2 + x - w / 2, H / 2 - y - h / 2];
-    }
-
-    function imagemPronta(img) {
-      return Boolean(img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0);
-    }
-
-    function roundRect(x, y, w, h, r) {
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r);
-      ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r);
-      ctx.closePath();
-    }
-
-    let estado = "instrucoes";
-    let pausado = false;
-    let pausadoEm = 0;
-
-    let pontos = 0;
-    let recorde = lerRecorde();
-    let vidas = 5;
-    let faseAtual = FASES_CONFIG[0];
-    let velocidade = faseAtual.velBase;
-    let ultimoTipo = 1;
-
-    let bannerFase = null; // { texto, subtitulo, ate }
-
-    let lixeiraX = 0;
-    let lixeiraY = -135;
-    let lixeiraFantasia = 1;
-    let lixeiraVisivel = false;
-
-    let dicaVisivel = false;
-    let dicaFantasia = 1;
-    let dicaAte = 0;
-
-    let clones = [];
-    let feedbacks = [];
-    let flashErroAte = 0;
-    let proximoSpawn = 0;
-    let ultimoAumentoVel = 0;
-
-    const teclas = {};
-
-    function selecionarLixeira(tipo) {
-      lixeiraFantasia = tipo;
-      botoesLixeira.forEach((btn) => {
-        btn.classList.toggle("ativa", Number(btn.dataset.tipo) === tipo);
-      });
-    }
-
-    botoesLixeira.forEach((btn) => {
-      btn.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        const tipo = Number(btn.dataset.tipo);
-        selecionarLixeira(tipo);
-        if (estado === "instrucoes") iniciarPartida();
-        focarCanvas();
-      });
-    });
-
-    let arrastando = false;
-
-    function atualizarPosicaoPorPonteiro(clientX) {
-      const rect = canvas.getBoundingClientRect();
-      const relX = (clientX - rect.left) / rect.width;
-      const scratchX = (relX * W) - (W / 2);
-      lixeiraX = Math.max(-205, Math.min(205, scratchX));
-    }
-
-    canvas.addEventListener("pointerdown", (e) => {
-      focarCanvas();
-      if (estado === "instrucoes") {
-        iniciarPartida();
-        return;
-      }
-      if (estado === "jogo" && !pausado) {
-        arrastando = true;
-        atualizarPosicaoPorPonteiro(e.clientX);
-      }
-    });
-
-    canvas.addEventListener("pointermove", (e) => {
-      if (arrastando && estado === "jogo" && !pausado) {
-        atualizarPosicaoPorPonteiro(e.clientX);
-      }
-    });
-
-    window.addEventListener("pointerup", () => {
-      arrastando = false;
-    });
-
-    function atualizarBotaoPausar() {
-      btnPausar.textContent = pausado ? "▶ Continuar" : "⏸ Pausar";
-    }
-
-    function alternarPausa() {
-      if (estado !== "jogo") return;
-      const agora = performance.now();
-      if (!pausado) {
-        pausado = true;
-        pausadoEm = agora;
-      } else {
-        const delta = agora - pausadoEm;
-        ultimoAumentoVel += delta;
-        proximoSpawn += delta;
-        if (dicaVisivel) dicaAte += delta;
-        if (flashErroAte > 0) flashErroAte += delta;
-        if (bannerFase) bannerFase.ate += delta;
-        for (const fb of feedbacks) fb.criadoEm += delta;
-        pausado = false;
-      }
-      atualizarBotaoPausar();
-      focarCanvas();
-    }
-
-    btnPausar.addEventListener("click", alternarPausa);
-
-    function registrarPonto() {
-      pontos += 1;
-      if (pontos > recorde) {
-        recorde = pontos;
-        salvarRecorde(recorde);
-      }
-
-      const novaFase = obterConfigFase(pontos);
-      if (novaFase.numero > faseAtual.numero && pontos < META_VITORIA) {
-        faseAtual = novaFase;
-        velocidade = faseAtual.velBase;
-        clones = []; // Limpa a tela para transição justa
-        const agora = performance.now();
-        proximoSpawn = agora + 1500;
-
-        let msgVida = "";
-        if (vidas < 5) {
-          vidas += 1;
-          msgVida = " • +1 ❤️ Bônus!";
+          setTimeout(() => {
+            try {
+              const sid = Date.now() + "_" + Math.floor(Math.random() * 10000);
+              const url = new URL(window.parent.location.href);
+              url.searchParams.set("save_score", "1");
+              url.searchParams.set("sid", sid);
+              url.searchParams.set("nome", NOME_JOGADOR);
+              url.searchParams.set("pts", String(pts));
+              url.searchParams.set("fase", String(faseAlcancada));
+              url.searchParams.set("modo", MODO_JOGO);
+              window.parent.location.href = url.toString();
+            } catch (e) {
+              bannerPodio.style.borderColor = "#ffb300";
+              bannerPodio.textContent = "✅ Partida encerrada: " + pts + " pts!";
+            }
+          }, 1400);
         }
 
-        bannerFase = {
-          texto: "✨ FASE " + faseAtual.numero + ": " + faseAtual.nome.toUpperCase() + " ✨",
-          subtitulo: faseAtual.descricao + msgVida,
-          ate: agora + 2200
+        function loadImg(src) {
+          const img = new Image();
+          if (src) img.src = src;
+          return img;
+        }
+
+        function loadAudio(src) {
+          if (!src) return null;
+          return new Audio(src);
+        }
+
+        let mudo = false;
+        function alternarMute() {
+          mudo = !mudo;
+          btnMute.textContent = mudo ? "🔇 Mudo" : "🔊 Som";
+          focarCanvas();
+        }
+        btnMute.addEventListener("click", alternarMute);
+
+        function playSound(aud) {
+          if (!aud || mudo) return;
+          try {
+            aud.currentTime = 0;
+            aud.play().catch(() => {});
+          } catch (e) {}
+        }
+
+        const imgs = {
+          bg: {
+            instrucoes: loadImg(URIS.bg_instrucoes),
+            jogo: loadImg(URIS.bg_jogo),
+            fim: loadImg(URIS.bg_fim),
+            vitoria: loadImg(URIS.bg_vitoria),
+          },
+          botao: loadImg(URIS.botao_iniciar),
+          lixeira: URIS.lixeira.map(loadImg),
+          lixo: URIS.lixo.map(loadImg),
+          dica: URIS.dica.map(loadImg),
         };
-      }
-    }
 
-    function iniciarPartida() {
-      const agora = performance.now();
-      estado = "jogo";
-      pausado = false;
-      bannerPodio.style.display = "none";
-      atualizarBotaoPausar();
-      pontos = 0;
-      vidas = 5;
-      faseAtual = FASES_CONFIG[0];
-      velocidade = faseAtual.velBase;
-      ultimoTipo = 1;
-      lixeiraX = 0;
-      lixeiraY = -135;
-      selecionarLixeira(1);
-      lixeiraVisivel = true;
-      dicaVisivel = false;
-      clones = [];
-      feedbacks = [];
-      flashErroAte = 0;
-      ultimoAumentoVel = agora;
-      proximoSpawn = agora + 1100;
-      bannerFase = {
-        texto: "FASE 1: " + faseAtual.nome.toUpperCase(),
-        subtitulo: faseAtual.descricao,
-        ate: agora + 1800
-      };
-    }
+        const sons = {
+          acerto: loadAudio(URIS.som_acerto),
+          erro: loadAudio(URIS.som_erro),
+          fim: loadAudio(URIS.som_fim),
+          vitoria: loadAudio(URIS.som_vitoria),
+        };
 
-    btnIniciarTop.addEventListener("click", () => {
-      iniciarPartida();
-      focarCanvas();
-    });
-
-    window.addEventListener("keydown", (e) => {
-      teclas[e.code] = true;
-      if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code)) {
-        e.preventDefault();
-      }
-      if (e.key && e.key.toLowerCase() === "m") {
-        alternarMute();
-        return;
-      }
-      if (e.key && e.key.toLowerCase() === "p") {
-        alternarPausa();
-        return;
-      }
-      if (estado === "instrucoes" && e.code === "Space") {
-        iniciarPartida();
-      } else if (estado === "jogo" && !pausado) {
-        if (["1", "2", "3", "4", "5"].includes(e.key)) {
-          selecionarLixeira(Number(e.key));
-        }
-      }
-    });
-
-    window.addEventListener("keyup", (e) => {
-      teclas[e.code] = false;
-    });
-
-    function adicionarFeedback(x, y, texto, cor) {
-      feedbacks.push({ x, y, texto, cor, criadoEm: performance.now() });
-    }
-
-    function dispararErro(tipoErrado, px = W / 2, py = H / 2) {
-      const agora = performance.now();
-      if (vidas > 0) {
-        vidas -= 1;
-        ultimoTipo = tipoErrado;
-      }
-      flashErroAte = agora + 240;
-      adicionarFeedback(px, py, "-1 ❤️", "#ff5252");
-      playSound(sons.erro);
-      dicaFantasia = ultimoTipo;
-      dicaVisivel = true;
-      dicaAte = agora + 2600;
-    }
-
-    function rectsColidem(a, b) {
-      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-    }
-
-    function loop(agora) {
-      const tempoRef = pausado ? pausadoEm : agora;
-
-      if (estado === "jogo" && !pausado) {
-        if (agora - ultimoAumentoVel >= 6500) {
-          velocidade += 0.15;
-          ultimoAumentoVel = agora;
+        function scratchToCanvas(x, y, w, h, rotCenter = null) {
+          if (rotCenter) {
+            return [W / 2 + x - rotCenter[0], H / 2 - y - rotCenter[1]];
+          }
+          return [W / 2 + x - w / 2, H / 2 - y - h / 2];
         }
 
-        if (teclas["ArrowLeft"] || teclas["KeyA"]) lixeiraX -= 7.8;
-        if (teclas["ArrowRight"] || teclas["KeyD"]) lixeiraX += 7.8;
-        if (lixeiraX > 205) lixeiraX = 205;
-        if (lixeiraX < -205) lixeiraX = -205;
+        function imagemPronta(img) {
+          return Boolean(img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0);
+        }
 
-        // Todos os 10 itens (tipos 1 a 5) sorteados desde a Fase 1
-        if (agora >= proximoSpawn && clones.length < faseAtual.maxSimultaneos) {
+        function roundRect(x, y, w, h, r) {
+          ctx.beginPath();
+          ctx.moveTo(x + r, y);
+          ctx.arcTo(x + w, y, x + w, y + h, r);
+          ctx.arcTo(x + w, y + h, x, y + h, r);
+          ctx.arcTo(x, y + h, x, y, r);
+          ctx.arcTo(x, y, x + w, y, r);
+          ctx.closePath();
+        }
+
+        // Estado do Jogo
+        let estado = "instrucoes";
+        let pausado = false;
+        let pausadoEm = 0;
+
+        let pontos = 0;
+        let recorde = lerRecorde();
+        let vidas = 5;
+        let tempoRestante = 60.0;
+        let ultimoTickTempo = 0;
+
+        let faseAtual = FASES_CONFIG[0];
+        let velocidade = faseAtual.velBase;
+        let ultimoTipo = 1;
+
+        // Combos e Estatísticas da Partida
+        let comboAtual = 0;
+        let errosNaPartida = 0;
+        let acertosVidro = 0;
+
+        // Efeitos de Power-Ups & Armadilhas
+        let imaAte = 0;
+        let freezeAte = 0;
+        let escudoAtivo = false;
+        let congeladoAte = 0;
+
+        let bannerFase = null;
+        let cartaoEdu = null; // { texto, cor, ate }
+
+        let lixeiraX = 0;
+        let lixeiraY = -135;
+        let lixeiraFantasia = 1;
+        let lixeiraVisivel = false;
+
+        let dicaVisivel = false;
+        let dicaFantasia = 1;
+        let dicaAte = 0;
+
+        let clones = [];
+        let feedbacks = [];
+        let flashErroAte = 0;
+        let proximoSpawn = 0;
+        let ultimoAumentoVel = 0;
+
+        const teclas = {};
+
+        function mostrarCartaoEducativo(texto, cor = "#ffe082", duracao = 2400) {
+          cartaoEdu = {
+            texto,
+            cor,
+            ate: performance.now() + duracao
+          };
+        }
+
+        function selecionarLixeira(tipo) {
+          if (estado === "jogo" && performance.now() < congeladoAte) return;
+          lixeiraFantasia = tipo;
+          botoesLixeira.forEach((btn) => {
+            btn.classList.toggle("ativa", Number(btn.dataset.tipo) === tipo);
+          });
+        }
+
+        botoesLixeira.forEach((btn) => {
+          btn.addEventListener("pointerdown", (e) => {
+            e.preventDefault();
+            const tipo = Number(btn.dataset.tipo);
+            selecionarLixeira(tipo);
+            if (estado === "instrucoes") iniciarPartida();
+            focarCanvas();
+          });
+        });
+
+        let arrastando = false;
+
+        function atualizarPosicaoPorPonteiro(clientX) {
+          if (performance.now() < congeladoAte) return;
+          const rect = canvas.getBoundingClientRect();
+          const relX = (clientX - rect.left) / rect.width;
+          const scratchX = (relX * W) - (W / 2);
+          lixeiraX = Math.max(-205, Math.min(205, scratchX));
+        }
+
+        canvas.addEventListener("pointerdown", (e) => {
+          focarCanvas();
+          if (estado === "instrucoes") {
+            iniciarPartida();
+            return;
+          }
+          if (estado === "jogo" && !pausado) {
+            arrastando = true;
+            atualizarPosicaoPorPonteiro(e.clientX);
+          }
+        });
+
+        canvas.addEventListener("pointermove", (e) => {
+          if (arrastando && estado === "jogo" && !pausado) {
+            atualizarPosicaoPorPonteiro(e.clientX);
+          }
+        });
+
+        window.addEventListener("pointerup", () => {
+          arrastando = false;
+        });
+
+        function atualizarBotaoPausar() {
+          btnPausar.textContent = pausado ? "▶ Continuar" : "⏸ Pausar";
+        }
+
+        function alternarPausa() {
+          if (estado !== "jogo") return;
+          const agora = performance.now();
+          if (!pausado) {
+            pausado = true;
+            pausadoEm = agora;
+          } else {
+            const delta = agora - pausadoEm;
+            ultimoAumentoVel += delta;
+            proximoSpawn += delta;
+            ultimoTickTempo += delta;
+            if (dicaVisivel) dicaAte += delta;
+            if (flashErroAte > 0) flashErroAte += delta;
+            if (imaAte > 0) imaAte += delta;
+            if (freezeAte > 0) freezeAte += delta;
+            if (congeladoAte > 0) congeladoAte += delta;
+            if (bannerFase) bannerFase.ate += delta;
+            if (cartaoEdu) cartaoEdu.ate += delta;
+            for (const fb of feedbacks) fb.criadoEm += delta;
+            pausado = false;
+          }
+          atualizarBotaoPausar();
+          focarCanvas();
+        }
+
+        btnPausar.addEventListener("click", alternarPausa);
+
+        function obterMultiplicadorCombo() {
+          if (comboAtual >= 10) return 3;
+          if (comboAtual >= 5) return 2;
+          return 1;
+        }
+
+        function registrarAcerto(basePts = 1, tipoMaterial = 1, px = W / 2, py = H / 2, msgCustom = null) {
+          comboAtual += 1;
+          if (comboAtual >= 10) desbloquearBadge("combo_3x");
+
+          if (tipoMaterial === 3) {
+            acertosVidro += 1;
+            if (acertosVidro >= 10) desbloquearBadge("mestre_vidro");
+          }
+
+          const mult = obterMultiplicadorCombo();
+          const ganho = basePts * mult;
+          pontos += ganho;
+
+          if (MODO_JOGO === "campanha" && pontos > META_CAMPANHA) {
+            pontos = META_CAMPANHA;
+          }
+
+          if (pontos > recorde) {
+            recorde = pontos;
+            salvarRecorde(recorde);
+          }
+
+          const txtFlutuante = msgCustom || ("+" + ganho + (mult > 1 ? " (" + mult + "x!)" : " ♻️"));
+          adicionarFeedback(px, py, txtFlutuante, mult > 1 ? "#ffd54f" : "#69f0ae");
+          playSound(sons.acerto);
+
+          // Verifica evolução de fase
+          const novaFase = obterConfigFase(pontos);
+          if (novaFase.numero > faseAtual.numero) {
+            if (faseAtual.numero === 4) desbloquearBadge("sobrevivente");
+            faseAtual = novaFase;
+            velocidade = faseAtual.velBase;
+            clones = [];
+            const agora = performance.now();
+            proximoSpawn = agora + 1400;
+
+            let msgBonus = "";
+            if (MODO_JOGO !== "tempo" && vidas < 5) {
+              vidas += 1;
+              msgBonus = " • +1 ❤️ Bônus!";
+            } else if (MODO_JOGO === "tempo") {
+              tempoRestante += 5;
+              msgBonus = " • +5s Bônus!";
+            }
+
+            bannerFase = {
+              texto: "✨ FASE " + faseAtual.numero + ": " + faseAtual.nome.toUpperCase() + " ✨",
+              subtitulo: faseAtual.desc + msgBonus,
+              ate: agora + 2100
+            };
+          }
+        }
+
+        function dispararErro(tipoCorreto, px = W / 2, py = H / 2, motivoEdu = null) {
+          const agora = performance.now();
+
+          // Escudo Ambiental absorve 1 erro!
+          if (escudoAtivo) {
+            escudoAtivo = false;
+            adicionarFeedback(px, py, "🛡️ Escudo Bloqueou!", "#4fc3f7");
+            mostrarCartaoEducativo("🛡️ Escudo Ambiental evitou a perda de vida!", "#4fc3f7", 2000);
+            playSound(sons.acerto);
+            return;
+          }
+
+          comboAtual = 0;
+          errosNaPartida += 1;
+
+          if (MODO_JOGO === "tempo") {
+            tempoRestante = Math.max(0, tempoRestante - 3);
+            adicionarFeedback(px, py, "-3s ⏱️", "#ff5252");
+          } else if (vidas > 0) {
+            vidas -= 1;
+            adicionarFeedback(px, py, "-1 ❤️", "#ff5252");
+          }
+
+          ultimoTipo = tipoCorreto;
+          flashErroAte = agora + 240;
+          playSound(sons.erro);
+
+          if (tipoCorreto >= 1 && tipoCorreto <= 5) {
+            dicaFantasia = tipoCorreto;
+            dicaVisivel = true;
+            dicaAte = agora + 2500;
+          }
+
+          if (motivoEdu) {
+            mostrarCartaoEducativo(motivoEdu, "#ff8a80", 2600);
+          }
+        }
+
+        function gerarEntidadeSpawn() {
+          const r = Math.random();
+          const x = Math.floor(Math.random() * 380) - 190;
+          const faseOnda = Math.random() * Math.PI * 2;
+
+          // 1) Power-ups (11% de chance)
+          if (r < 0.11) {
+            const poolPwr = ["ima", "freeze", "escudo", "coringa"];
+            if (MODO_JOGO !== "tempo" && vidas <= 2) {
+              poolPwr.push("vida", "vida"); // Maior chance se estiver com pouca vida
+            }
+            const pwr = poolPwr[Math.floor(Math.random() * poolPwr.length)];
+            return { x, y: 175, kind: "powerup", subtipo: pwr, tipo: 0, faseOnda, fatorPeso: 0.6 };
+          }
+
+          // 2) Armadilha: Pilha Tóxica / Bomba (a partir de 3 pts, 9% de chance)
+          if (pontos >= 3 && r < 0.20) {
+            return { x, y: 175, kind: "bomba", subtipo: "pilha", tipo: 0, faseOnda, fatorPeso: 0.7 };
+          }
+
+          // 3) Itens Especiais / Compostos / Saco Combo (18% de chance)
+          if (r < 0.38) {
+            const subR = Math.random();
+            if (subR < 0.40) {
+              // Caixa de pizza engordurada -> Vai no Orgânico (tipo 5)!
+              return { x, y: 175, kind: "especial", subtipo: "pizza", tipo: 5, faseOnda, fatorPeso: 1.2 };
+            } else if (subR < 0.75) {
+              // Garrafa PET cheia -> Vale +2 pts no Plástico (tipo 2)!
+              return { x, y: 175, kind: "especial", subtipo: "pet_cheia", tipo: 2, faseOnda, fatorPeso: 0.85 };
+            } else {
+              // Saco de Reciclagem -> Abre no ar espalhando 3 itens!
+              const tipoSaco = Math.floor(Math.random() * 5) + 1;
+              return { x, y: 175, kind: "saco", subtipo: "saco", tipo: tipoSaco, faseOnda, fatorPeso: 0.9 };
+            }
+          }
+
+          // 4) Itens Base (1 a 10 - todos disponíveis desde a Fase 1!)
           const item = Math.floor(Math.random() * 10) + 1;
           const tipo = ((item - 1) % 5) + 1;
-          // Itens leves (1=Papel, 2=Plástico) sofrem mais vento nas fases 4 e 5
           const fatorPeso = (tipo === 1 || tipo === 2) ? 1.35 : 0.75;
-          clones.push({
-            x: Math.floor(Math.random() * 381) - 190,
-            y: 175,
-            item,
-            tipo,
-            faseOnda: Math.random() * Math.PI * 2,
-            fatorPeso
-          });
-          const intervalo = faseAtual.spawnMin + Math.random() * (faseAtual.spawnMax - faseAtual.spawnMin);
-          proximoSpawn = agora + intervalo;
+          return { x, y: 175, kind: "base", item, tipo, faseOnda, fatorPeso };
         }
 
-        const imgL = imgs.lixeira[lixeiraFantasia - 1];
-        const lw = (imgL && imgL.naturalWidth) || 80;
-        const lh = (imgL && imgL.naturalHeight) || 84;
-        const [lx, ly] = scratchToCanvas(lixeiraX, lixeiraY, lw, lh, [40, 42]);
-        const rectLixeira = { x: lx, y: ly, w: lw, h: lh };
-
-        const restantes = [];
-        for (const c of clones) {
-          c.y -= velocidade;
-
-          if (faseAtual.ventoAmp > 0) {
-            c.x += Math.sin((agora * 0.004) + c.faseOnda) * faseAtual.ventoAmp * c.fatorPeso;
-            c.x = Math.max(-205, Math.min(205, c.x));
+        function abrirSacoNoAr(saco) {
+          playSound(sons.acerto);
+          const [sx, sy] = scratchToCanvas(saco.x, saco.y, 44, 44);
+          adicionarFeedback(sx + 22, sy, "🛍️ +3 Itens!", "#81c784");
+          const offsets = [-55, 0, 55];
+          for (let i = 0; i < 3; i++) {
+            const itemDoTipo = saco.tipo + (Math.random() < 0.5 ? 0 : 5);
+            clones.push({
+              x: Math.max(-195, Math.min(195, saco.x + offsets[i])),
+              y: saco.y + (i === 1 ? 12 : 0),
+              kind: "base",
+              item: itemDoTipo,
+              tipo: saco.tipo,
+              faseOnda: Math.random() * Math.PI * 2,
+              fatorPeso: 0.9
+            });
           }
+        }
 
-          const imgC = imgs.lixo[c.item - 1];
-          const cw = (imgC && imgC.naturalWidth) || 50;
-          const ch = (imgC && imgC.naturalHeight) || 50;
-          const [cx, cy] = scratchToCanvas(c.x, c.y, cw, ch);
-          const rectItem = { x: cx, y: cy, w: cw, h: ch };
+        function aplicarPowerUp(subtipo, px, py) {
+          const agora = performance.now();
+          playSound(sons.acerto);
 
-          if (rectsColidem(rectItem, rectLixeira)) {
-            if (lixeiraFantasia === c.tipo) {
-              registrarPonto();
-              adicionarFeedback(lx + lw / 2, ly - 6, "+1 ♻️", "#69f0ae");
-              playSound(sons.acerto);
-            } else {
-              dispararErro(c.tipo, lx + lw / 2, ly - 6);
+          if (subtipo === "ima") {
+            imaAte = agora + 5000;
+            adicionarFeedback(px, py, "🧲 Ímã Seletivo (5s)!", "#64b5f6");
+            mostrarCartaoEducativo("🧲 Ímã ativo! Atraindo lixos da cor selecionada.", "#64b5f6", 2000);
+          } else if (subtipo === "freeze") {
+            freezeAte = agora + 6000;
+            adicionarFeedback(px, py, "⏳ Câmera Lenta (6s)!", "#80deea");
+            mostrarCartaoEducativo("⏳ Eco-Freeze! Velocidade reduzida pela metade.", "#80deea", 2000);
+          } else if (subtipo === "escudo") {
+            escudoAtivo = true;
+            adicionarFeedback(px, py, "🛡️ Escudo Ativo!", "#4fc3f7");
+            mostrarCartaoEducativo("🛡️ Escudo Ambiental! Protege contra o próximo erro.", "#4fc3f7", 2000);
+          } else if (subtipo === "vida") {
+            vidas = Math.min(5, vidas + 1);
+            adicionarFeedback(px, py, "❤️ +1 Vida!", "#ff8a80");
+          } else if (subtipo === "coringa") {
+            let convertidos = 0;
+            for (const c of clones) {
+              if (c.kind === "base" || c.kind === "especial") {
+                c.tipo = lixeiraFantasia;
+                c.kind = "base";
+                c.item = lixeiraFantasia;
+                convertidos++;
+              }
             }
-            continue;
+            adicionarFeedback(px, py, "✨ Coringa (" + convertidos + " itens)!", "#ffd54f");
+            mostrarCartaoEducativo("✨ Transformador! Todos os itens viraram " + NOMES_LIXEIRAS[lixeiraFantasia], "#ffd54f", 2200);
           }
-
-          if (c.y < -170) {
-            dispararErro(c.tipo, cx + cw / 2, H - 30);
-            continue;
-          }
-
-          restantes.push(c);
         }
-        clones = restantes;
 
-        if (dicaVisivel && agora >= dicaAte) dicaVisivel = false;
-        if (bannerFase && agora >= bannerFase.ate) bannerFase = null;
-
-        if (vidas < 1) {
-          estado = "fim";
+        function iniciarPartida() {
+          const agora = performance.now();
+          estado = "jogo";
           pausado = false;
+          bannerPodio.style.display = "none";
           atualizarBotaoPausar();
-          lixeiraVisivel = false;
+
+          pontos = 0;
+          vidas = 5;
+          tempoRestante = 60.0;
+          ultimoTickTempo = agora;
+
+          comboAtual = 0;
+          errosNaPartida = 0;
+          acertosVidro = 0;
+
+          imaAte = 0;
+          freezeAte = 0;
+          escudoAtivo = false;
+          congeladoAte = 0;
+
+          faseAtual = FASES_CONFIG[0];
+          velocidade = faseAtual.velBase;
+          ultimoTipo = 1;
+          lixeiraX = 0;
+          lixeiraY = -135;
+          selecionarLixeira(1);
+          lixeiraVisivel = true;
           dicaVisivel = false;
+          cartaoEdu = null;
           clones = [];
-          playSound(sons.fim);
-          registrarAutomaticamenteNoGitHub(pontos, faseAtual.numero);
-        } else if (pontos >= META_VITORIA) {
-          estado = "vitoria";
-          pausado = false;
-          atualizarBotaoPausar();
-          lixeiraVisivel = false;
-          dicaVisivel = false;
-          clones = [];
-          playSound(sons.vitoria);
-          registrarAutomaticamenteNoGitHub(pontos, faseAtual.numero);
+          feedbacks = [];
+          flashErroAte = 0;
+          ultimoAumentoVel = agora;
+          proximoSpawn = agora + 1000;
+
+          const tituloInicio = MODO_JOGO === "campanha"
+            ? "FASE 1: " + faseAtual.nome.toUpperCase()
+            : (MODO_JOGO === "infinito" ? "MODO INFINITO (ARCADE)" : "CONTRA O RELÓGIO (60s)");
+          bannerFase = {
+            texto: tituloInicio,
+            subtitulo: "Desvie das pilhas 🔋 e pegue os bônus!",
+            ate: agora + 1800
+          };
         }
-      }
 
-      ctx.save();
-      if (!pausado && tempoRef < flashErroAte) {
-        const tremor = Math.sin(tempoRef * 0.08) * 3;
-        ctx.translate(tremor, 0);
-      }
+        btnIniciarTop.addEventListener("click", () => {
+          iniciarPartida();
+          focarCanvas();
+        });
 
-      ctx.clearRect(-10, -10, W + 20, H + 20);
-      ctx.fillStyle = "#1b2a1e";
-      ctx.fillRect(0, 0, W, H);
-
-      const bgAtual = imgs.bg[estado];
-      if (imagemPronta(bgAtual)) {
-        ctx.drawImage(bgAtual, 0, 0, W, H);
-      } else if (estado === "instrucoes") {
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 22px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("COLETA SELETIVA", W / 2, 120);
-        ctx.font = "15px sans-serif";
-        ctx.fillStyle = "#a5d6a7";
-        ctx.fillText("Toque na tela ou aperte ESPAÇO", W / 2, 160);
-        ctx.textAlign = "left";
-      }
-
-      if (estado === "instrucoes") {
-        if (imagemPronta(imgs.botao)) {
-          const escala = Math.floor(agora / 300) % 2 === 1 ? 1.08 : 1.0;
-          const bw = imgs.botao.naturalWidth * escala;
-          const bh = imgs.botao.naturalHeight * escala;
-          const [bx, by] = scratchToCanvas(36, 28, bw, bh, [147.5 * escala, -121.4 * escala]);
-          ctx.drawImage(imgs.botao, bx, by, bw, bh);
-        }
-        ctx.fillStyle = "rgba(15, 25, 18, 0.88)";
-        roundRect(W - 165, 8, 157, 28, 8);
-        ctx.fill();
-        ctx.fillStyle = "#ffe082";
-        ctx.font = "bold 13px sans-serif";
-        ctx.fillText("🏆 Recorde: " + recorde + " / " + META_VITORIA, W - 156, 27);
-      } else if (estado === "jogo") {
-        if (lixeiraVisivel) {
-          const imgL = imgs.lixeira[lixeiraFantasia - 1];
-          const lw = (imgL && imgL.naturalWidth) || 80;
-          const lh = (imgL && imgL.naturalHeight) || 84;
-          const [lx, ly] = scratchToCanvas(lixeiraX, lixeiraY, lw, lh, [40, 42]);
-          if (imagemPronta(imgL)) {
-            ctx.drawImage(imgL, lx, ly, lw, lh);
-          } else {
-            ctx.fillStyle = "#2e7d32";
-            ctx.fillRect(lx, ly, lw, lh);
+        window.addEventListener("keydown", (e) => {
+          teclas[e.code] = true;
+          if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code)) {
+            e.preventDefault();
           }
-        }
-
-        for (const c of clones) {
-          const imgC = imgs.lixo[c.item - 1];
-          const cw = (imgC && imgC.naturalWidth) || 50;
-          const ch = (imgC && imgC.naturalHeight) || 50;
-          const [cx, cy] = scratchToCanvas(c.x, c.y, cw, ch);
-          if (imagemPronta(imgC)) {
-            ctx.drawImage(imgC, cx, cy, cw, ch);
-          } else {
-            ctx.fillStyle = "#fbc02d";
-            ctx.fillRect(cx, cy, cw, ch);
+          if (e.key && e.key.toLowerCase() === "m") {
+            alternarMute();
+            return;
           }
-        }
-
-        if (dicaVisivel) {
-          const imgD = imgs.dica[dicaFantasia - 1];
-          const dw = (imgD && imgD.naturalWidth) || 440;
-          const dh = (imgD && imgD.naturalHeight) || 60;
-          const [dx, dy] = scratchToCanvas(0, 95, dw, dh, [220, 30]);
-          if (imagemPronta(imgD)) {
-            ctx.drawImage(imgD, dx, dy, dw, dh);
+          if (e.key && e.key.toLowerCase() === "p") {
+            alternarPausa();
+            return;
           }
+          if (estado === "instrucoes" && e.code === "Space") {
+            iniciarPartida();
+          } else if (estado === "jogo" && !pausado) {
+            if (["1", "2", "3", "4", "5"].includes(e.key)) {
+              selecionarLixeira(Number(e.key));
+            }
+          }
+        });
+
+        window.addEventListener("keyup", (e) => {
+          teclas[e.code] = false;
+        });
+
+        function adicionarFeedback(x, y, texto, cor) {
+          feedbacks.push({ x, y, texto, cor, criadoEm: performance.now() });
         }
 
-        if (bannerFase && tempoRef < bannerFase.ate) {
+        function rectsColidem(a, b) {
+          return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+        }
+
+        // Desenho procedural dos novos itens especiais, armadilhas e power-ups
+        function desenharEntidadeCustom(c, cx, cy, cw, ch) {
           ctx.save();
-          ctx.fillStyle = "rgba(12, 28, 18, 0.90)";
-          roundRect(W / 2 - 190, H / 2 - 42, 380, 68, 12);
-          ctx.fill();
-          ctx.strokeStyle = "#81c784";
-          ctx.lineWidth = 2;
-          ctx.stroke();
+          const centroX = cx + cw / 2;
+          const centroY = cy + ch / 2;
+          const raio = cw * 0.44;
 
-          ctx.textAlign = "center";
-          ctx.fillStyle = "#ffe082";
-          ctx.font = "bold 16px sans-serif";
-          ctx.fillText(bannerFase.texto, W / 2, H / 2 - 14);
-
-          ctx.fillStyle = "#c8e6c9";
-          ctx.font = "13px sans-serif";
-          ctx.fillText(bannerFase.subtitulo, W / 2, H / 2 + 10);
+          if (c.kind === "bomba") {
+            // Pilha Tóxica / Bomba
+            ctx.fillStyle = "#212121";
+            ctx.beginPath();
+            ctx.arc(centroX, centroY, raio, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = "#ff1744";
+            ctx.stroke();
+            ctx.font = "22px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("🔋", centroX, centroY + 1);
+          } else if (c.kind === "especial") {
+            ctx.fillStyle = c.subtipo === "pizza" ? "#4e342e" : "#b71c1c";
+            ctx.beginPath();
+            ctx.arc(centroX, centroY, raio, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "#ffe082";
+            ctx.stroke();
+            ctx.font = "22px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(c.subtipo === "pizza" ? "🍕" : "🧴", centroX, centroY + 1);
+          } else if (c.kind === "saco") {
+            const coresTipo = { 1: "#1565c0", 2: "#c62828", 3: "#2e7d32", 4: "#f9a825", 5: "#5d4037" };
+            ctx.fillStyle = coresTipo[c.tipo] || "#37474f";
+            ctx.beginPath();
+            ctx.arc(centroX, centroY, raio, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = "#ffffff";
+            ctx.stroke();
+            ctx.font = "21px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("🛍️", centroX, centroY + 1);
+          } else if (c.kind === "powerup") {
+            ctx.fillStyle = "rgba(13, 71, 161, 0.9)";
+            ctx.beginPath();
+            ctx.arc(centroX, centroY, raio, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = "#40c4ff";
+            ctx.stroke();
+            const icones = { ima: "🧲", freeze: "⏳", escudo: "🛡️", coringa: "✨", vida: "❤️" };
+            ctx.font = "21px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(icones[c.subtipo] || "⭐", centroX, centroY + 1);
+          }
           ctx.restore();
         }
 
-        const proxFeedbacks = [];
-        for (const fb of feedbacks) {
-          const elapsed = tempoRef - fb.criadoEm;
-          if (elapsed < 750) {
-            const yAtual = fb.y - (elapsed * 0.04);
-            const alpha = 1 - (elapsed / 750);
-            ctx.save();
-            ctx.globalAlpha = Math.max(0, alpha);
-            ctx.font = "bold 16px sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillStyle = fb.cor;
-            ctx.fillText(fb.texto, fb.x, yAtual);
-            ctx.restore();
-            proxFeedbacks.push(fb);
+        function encerrarPartida(vitoria) {
+          estado = vitoria ? "vitoria" : "fim";
+          pausado = false;
+          atualizarBotaoPausar();
+          lixeiraVisivel = false;
+          dicaVisivel = false;
+          clones = [];
+          playSound(vitoria ? sons.vitoria : sons.fim);
+
+          if (vitoria && MODO_JOGO === "campanha") {
+            desbloquearBadge("campeao");
+            if (errosNaPartida === 0) desbloquearBadge("precisao_100");
           }
+
+          enviarPlacarSeguroParaPython(pontos, faseAtual.numero);
         }
-        feedbacks = proxFeedbacks;
 
-        // HUD Superior
-        ctx.fillStyle = "rgba(15, 25, 18, 0.88)";
-        roundRect(8, 8, 148, 28, 8);
-        ctx.fill();
-        roundRect(8, 40, 148, 28, 8);
-        ctx.fill();
-        roundRect(W - 156, 8, 148, 28, 8);
-        ctx.fill();
-        roundRect(W - 156, 40, 148, 28, 8);
-        ctx.fill();
+        function loop(agora) {
+          const tempoRef = pausado ? pausadoEm : agora;
 
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 14px sans-serif";
-        ctx.fillText("♻️ Pontos: " + pontos + "/" + META_VITORIA, 16, 27);
-        ctx.fillText("❤️ Vidas: " + vidas, 16, 59);
+          if (estado === "jogo" && !pausado) {
+            // Cronômetro no modo Contra o Relógio
+            if (MODO_JOGO === "tempo") {
+              const dt = (agora - ultimoTickTempo) / 1000;
+              tempoRestante = Math.max(0, tempoRestante - dt);
+              ultimoTickTempo = agora;
+              if (tempoRestante <= 0) {
+                encerrarPartida(pontos >= 20);
+              }
+            }
 
-        ctx.fillStyle = "#ffe082";
-        ctx.font = "bold 13px sans-serif";
-        ctx.fillText("🏆 Recorde: " + recorde, W - 148, 27);
+            // Aceleração contínua no Modo Infinito ou gradual nas fases
+            if (agora - ultimoAumentoVel >= 6500) {
+              velocidade += MODO_JOGO === "infinito" ? 0.22 : 0.14;
+              ultimoAumentoVel = agora;
+            }
 
-        ctx.fillStyle = "#81c784";
-        ctx.fillText("🚩 Fase " + faseAtual.numero + "/5", W - 148, 59);
+            // Movimento da lixeira (bloqueado se congelada por pilha tóxica)
+            const estaCongelado = agora < congeladoAte;
+            if (!estaCongelado) {
+              if (teclas["ArrowLeft"] || teclas["KeyA"]) lixeiraX -= 7.8;
+              if (teclas["ArrowRight"] || teclas["KeyD"]) lixeiraX += 7.8;
+              if (lixeiraX > 205) lixeiraX = 205;
+              if (lixeiraX < -205) lixeiraX = -205;
+            }
 
-        if (pausado) {
-          ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+            // Spawn de itens
+            if (agora >= proximoSpawn && clones.length < faseAtual.maxSim) {
+              clones.push(gerarEntidadeSpawn());
+              const intervalo = faseAtual.spawnMin + Math.random() * (faseAtual.spawnMax - faseAtual.spawnMin);
+              proximoSpawn = agora + intervalo;
+            }
+
+            const imgL = imgs.lixeira[lixeiraFantasia - 1];
+            const lw = (imgL && imgL.naturalWidth) || 80;
+            const lh = (imgL && imgL.naturalHeight) || 84;
+            const [lx, ly] = scratchToCanvas(lixeiraX, lixeiraY, lw, lh, [40, 42]);
+            const rectLixeira = { x: lx, y: ly, w: lw, h: lh };
+
+            const velEfetiva = agora < freezeAte ? velocidade * 0.5 : velocidade;
+            const imaAtivo = agora < imaAte;
+
+            const restantes = [];
+            for (const c of clones) {
+              c.y -= velEfetiva;
+
+              // Vento nas fases 4 e 5
+              if (faseAtual.ventoAmp > 0) {
+                c.x += Math.sin((agora * 0.004) + c.faseOnda) * faseAtual.ventoAmp * c.fatorPeso;
+              }
+
+              // Ímã Seletivo: puxa itens compatíveis com a lixeira atual
+              if (imaAtivo && (c.kind === "base" || c.kind === "especial") && c.tipo === lixeiraFantasia) {
+                c.x += (lixeiraX - c.x) * 0.07;
+              }
+
+              c.x = Math.max(-205, Math.min(205, c.x));
+
+              let cw = 46, ch = 46;
+              if (c.kind === "base") {
+                const imgC = imgs.lixo[c.item - 1];
+                cw = (imgC && imgC.naturalWidth) || 50;
+                ch = (imgC && imgC.naturalHeight) || 50;
+              }
+              const [cx, cy] = scratchToCanvas(c.x, c.y, cw, ch);
+              const rectItem = { x: cx, y: cy, w: cw, h: ch };
+
+              if (rectsColidem(rectItem, rectLixeira)) {
+                const px = lx + lw / 2;
+                const py = ly - 6;
+
+                if (c.kind === "powerup") {
+                  aplicarPowerUp(c.subtipo, px, py);
+                } else if (c.kind === "bomba") {
+                  // Pilha tóxica na lixeira comum = dano + congelamento!
+                  if (escudoAtivo) {
+                    escudoAtivo = false;
+                    adicionarFeedback(px, py, "🛡️ Pilha Bloqueada!", "#4fc3f7");
+                  } else {
+                    comboAtual = 0;
+                    errosNaPartida += 1;
+                    congeladoAte = agora + 2000;
+                    flashErroAte = agora + 300;
+                    playSound(sons.erro);
+                    if (MODO_JOGO === "tempo") {
+                      tempoRestante = Math.max(0, tempoRestante - 5);
+                      adicionarFeedback(px, py, "🔋 -5s e Congelado!", "#ff5252");
+                    } else {
+                      vidas = Math.max(0, vidas - 2);
+                      adicionarFeedback(px, py, "🔋 -2 ❤️ e Congelado!", "#ff5252");
+                    }
+                    mostrarCartaoEducativo("⚠️ Pilhas e baterias são tóxicas! Desvie delas!", "#ff5252", 2600);
+                  }
+                } else if (c.kind === "saco") {
+                  abrirSacoNoAr(c);
+                } else if (c.kind === "especial") {
+                  if (lixeiraFantasia === c.tipo) {
+                    if (c.subtipo === "pizza") {
+                      desbloquearBadge("pizza_expert");
+                      registrarAcerto(2, 5, px, py, "🍕 +2 Orgânico!");
+                      mostrarCartaoEducativo("🍕 Caixa com gordura não recicla papel → Lixeira Marrom!", "#a5d6a7", 2300);
+                    } else {
+                      registrarAcerto(2, 2, px, py, "🧴 +2 Bônus PET!");
+                    }
+                  } else {
+                    const msgPizza = c.subtipo === "pizza"
+                      ? "🍕 Caixa de pizza engordurada vai no Orgânico (Marrom)!"
+                      : "🧴 Garrafa PET vai na Lixeira Vermelha (Plástico)!";
+                    dispararErro(c.tipo, px, py, msgPizza);
+                  }
+                } else {
+                  // Item base (1 a 10)
+                  if (lixeiraFantasia === c.tipo) {
+                    registrarAcerto(1, c.tipo, px, py);
+                  } else {
+                    const nomeItem = NOMES_ITENS_BASE[c.item] || "Item";
+                    dispararErro(
+                      c.tipo,
+                      px,
+                      py,
+                      "❌ " + nomeItem + " → Lixeira " + NOMES_LIXEIRAS[c.tipo] + "!"
+                    );
+                  }
+                }
+                continue;
+              }
+
+              // Item passou do fundo da tela
+              if (c.y < -170) {
+                if (c.kind === "base" || c.kind === "especial") {
+                  const nomeItem = c.kind === "especial"
+                    ? (c.subtipo === "pizza" ? "Caixa de Pizza" : "Garrafa PET")
+                    : (NOMES_ITENS_BASE[c.item] || "Resíduo");
+                  dispararErro(
+                    c.tipo,
+                    cx + cw / 2,
+                    H - 30,
+                    "⚠️ Caiu no chão! " + nomeItem + " → " + NOMES_LIXEIRAS[c.tipo]
+                  );
+                }
+                // Bombas, sacos e power-ups que caem no chão apenas somem sem penalidade
+                continue;
+              }
+
+              restantes.push(c);
+            }
+            clones = restantes;
+
+            if (dicaVisivel && agora >= dicaAte) dicaVisivel = false;
+            if (bannerFase && agora >= bannerFase.ate) bannerFase = null;
+            if (cartaoEdu && agora >= cartaoEdu.ate) cartaoEdu = null;
+
+            if (MODO_JOGO !== "tempo" && vidas < 1) {
+              encerrarPartida(false);
+            } else if (MODO_JOGO === "campanha" && pontos >= META_CAMPANHA) {
+              encerrarPartida(true);
+            }
+          }
+
+          // ====================================================================
+          // RENDERIZAÇÃO NO CANVAS
+          // ====================================================================
+          ctx.save();
+          if (!pausado && tempoRef < flashErroAte) {
+            const tremor = Math.sin(tempoRef * 0.08) * 3;
+            ctx.translate(tremor, 0);
+          }
+
+          ctx.clearRect(-10, -10, W + 20, H + 20);
+          ctx.fillStyle = "#1b2a1e";
           ctx.fillRect(0, 0, W, H);
-          ctx.fillStyle = "#ffffff";
-          ctx.font = "bold 26px sans-serif";
-          ctx.textAlign = "center";
-          ctx.fillText("PAUSADO", W / 2, H / 2 - 6);
-          ctx.font = "14px sans-serif";
-          ctx.fillStyle = "#cfd8dc";
-          ctx.fillText("Toque em Continuar ou aperte P", W / 2, H / 2 + 22);
-          ctx.textAlign = "left";
+
+          const bgAtual = imgs.bg[estado];
+          if (imagemPronta(bgAtual)) {
+            ctx.drawImage(bgAtual, 0, 0, W, H);
+          } else if (estado === "instrucoes") {
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 22px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("COLETA SELETIVA PRO", W / 2, 120);
+            ctx.font = "15px sans-serif";
+            ctx.fillStyle = "#a5d6a7";
+            ctx.fillText("Toque na tela ou aperte ESPAÇO", W / 2, 160);
+            ctx.textAlign = "left";
+          }
+
+          if (estado === "instrucoes") {
+            if (imagemPronta(imgs.botao)) {
+              const escala = Math.floor(agora / 300) % 2 === 1 ? 1.08 : 1.0;
+              const bw = imgs.botao.naturalWidth * escala;
+              const bh = imgs.botao.naturalHeight * escala;
+              const [bx, by] = scratchToCanvas(36, 28, bw, bh, [147.5 * escala, -121.4 * escala]);
+              ctx.drawImage(imgs.botao, bx, by, bw, bh);
+            }
+            ctx.fillStyle = "rgba(15, 25, 18, 0.88)";
+            roundRect(W - 170, 8, 162, 28, 8);
+            ctx.fill();
+            ctx.fillStyle = "#ffe082";
+            ctx.font = "bold 13px sans-serif";
+            ctx.fillText("🏆 Recorde: " + recorde + " pts", W - 160, 27);
+          } else if (estado === "jogo") {
+            // Aura visual na lixeira (Escudo, Ímã, Congelado ou Combo)
+            if (lixeiraVisivel) {
+              const imgL = imgs.lixeira[lixeiraFantasia - 1];
+              const lw = (imgL && imgL.naturalWidth) || 80;
+              const lh = (imgL && imgL.naturalHeight) || 84;
+              const [lx, ly] = scratchToCanvas(lixeiraX, lixeiraY, lw, lh, [40, 42]);
+
+              if (escudoAtivo || tempoRef < imaAte || tempoRef < congeladoAte || comboAtual >= 5) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(lx + lw / 2, ly + lh / 2, 48, 0, Math.PI * 2);
+                if (tempoRef < congeladoAte) {
+                  ctx.fillStyle = "rgba(0, 229, 255, 0.35)";
+                } else if (escudoAtivo) {
+                  ctx.fillStyle = "rgba(79, 195, 247, 0.28)";
+                } else if (tempoRef < imaAte) {
+                  ctx.fillStyle = "rgba(100, 181, 246, 0.28)";
+                } else {
+                  ctx.fillStyle = comboAtual >= 10 ? "rgba(255, 87, 34, 0.32)" : "rgba(255, 213, 79, 0.25)";
+                }
+                ctx.fill();
+                ctx.restore();
+              }
+
+              if (imagemPronta(imgL)) {
+                ctx.drawImage(imgL, lx, ly, lw, lh);
+              } else {
+                ctx.fillStyle = "#2e7d32";
+                ctx.fillRect(lx, ly, lw, lh);
+              }
+
+              if (tempoRef < congeladoAte) {
+                ctx.font = "22px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText("🧊", lx + lw / 2, ly + lh / 2);
+                ctx.textAlign = "left";
+              }
+            }
+
+            // Desenho dos itens em queda
+            for (const c of clones) {
+              if (c.kind === "base") {
+                const imgC = imgs.lixo[c.item - 1];
+                const cw = (imgC && imgC.naturalWidth) || 50;
+                const ch = (imgC && imgC.naturalHeight) || 50;
+                const [cx, cy] = scratchToCanvas(c.x, c.y, cw, ch);
+                if (imagemPronta(imgC)) {
+                  ctx.drawImage(imgC, cx, cy, cw, ch);
+                } else {
+                  ctx.fillStyle = "#fbc02d";
+                  ctx.fillRect(cx, cy, cw, ch);
+                }
+              } else {
+                const [cx, cy] = scratchToCanvas(c.x, c.y, 46, 46);
+                desenharEntidadeCustom(c, cx, cy, 46, 46);
+              }
+            }
+
+            if (dicaVisivel) {
+              const imgD = imgs.dica[dicaFantasia - 1];
+              const dw = (imgD && imgD.naturalWidth) || 440;
+              const dh = (imgD && imgD.naturalHeight) || 60;
+              const [dx, dy] = scratchToCanvas(0, 82, dw, dh, [220, 30]);
+              if (imagemPronta(imgD)) {
+                ctx.drawImage(imgD, dx, dy, dw, dh);
+              }
+            }
+
+            // Cartão Educativo Instantâneo
+            if (cartaoEdu && tempoRef < cartaoEdu.ate) {
+              ctx.save();
+              ctx.fillStyle = "rgba(10, 22, 14, 0.92)";
+              roundRect(16, 74, W - 32, 28, 8);
+              ctx.fill();
+              ctx.strokeStyle = cartaoEdu.cor;
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+              ctx.fillStyle = cartaoEdu.cor;
+              ctx.font = "bold 12px sans-serif";
+              ctx.textAlign = "center";
+              ctx.fillText(cartaoEdu.texto, W / 2, 92);
+              ctx.restore();
+            }
+
+            // Banner de Transição de Fase
+            if (bannerFase && tempoRef < bannerFase.ate) {
+              ctx.save();
+              ctx.fillStyle = "rgba(12, 28, 18, 0.92)";
+              roundRect(W / 2 - 195, H / 2 - 42, 390, 68, 12);
+              ctx.fill();
+              ctx.strokeStyle = "#81c784";
+              ctx.lineWidth = 2;
+              ctx.stroke();
+
+              ctx.textAlign = "center";
+              ctx.fillStyle = "#ffe082";
+              ctx.font = "bold 15px sans-serif";
+              ctx.fillText(bannerFase.texto, W / 2, H / 2 - 14);
+
+              ctx.fillStyle = "#c8e6c9";
+              ctx.font = "12px sans-serif";
+              ctx.fillText(bannerFase.subtitulo, W / 2, H / 2 + 10);
+              ctx.restore();
+            }
+
+            // Feedbacks Flutuantes
+            const proxFeedbacks = [];
+            for (const fb of feedbacks) {
+              const elapsed = tempoRef - fb.criadoEm;
+              if (elapsed < 750) {
+                const yAtual = fb.y - (elapsed * 0.04);
+                const alpha = 1 - (elapsed / 750);
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, alpha);
+                ctx.font = "bold 15px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillStyle = fb.cor;
+                ctx.fillText(fb.texto, fb.x, yAtual);
+                ctx.restore();
+                proxFeedbacks.push(fb);
+              }
+            }
+            feedbacks = proxFeedbacks;
+
+            // HUD Superior
+            ctx.fillStyle = "rgba(15, 25, 18, 0.88)";
+            roundRect(8, 8, 154, 28, 8);
+            ctx.fill();
+            roundRect(8, 40, 154, 28, 8);
+            ctx.fill();
+            roundRect(W - 162, 8, 154, 28, 8);
+            ctx.fill();
+            roundRect(W - 162, 40, 154, 28, 8);
+            ctx.fill();
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 13px sans-serif";
+            const labelPts = MODO_JOGO === "campanha"
+              ? "♻️ Pontos: " + pontos + "/" + META_CAMPANHA
+              : "♻️ Pontos: " + pontos;
+            ctx.fillText(labelPts, 16, 27);
+
+            if (MODO_JOGO === "tempo") {
+              ctx.fillStyle = tempoRestante <= 10 ? "#ff5252" : "#80deea";
+              ctx.fillText("⏱️ Tempo: " + Math.ceil(tempoRestante) + "s", 16, 59);
+            } else {
+              ctx.fillStyle = "#ffffff";
+              ctx.fillText("❤️ Vidas: " + vidas + (escudoAtivo ? " 🛡️" : ""), 16, 59);
+            }
+
+            const mult = obterMultiplicadorCombo();
+            ctx.fillStyle = mult > 1 ? "#ffd54f" : "#ffe082";
+            ctx.fillText(
+              mult > 1 ? "🔥 Combo " + mult + "x (" + comboAtual + ")" : "🏆 Recorde: " + recorde,
+              W - 154,
+              27
+            );
+
+            ctx.fillStyle = "#81c784";
+            ctx.fillText("🚩 Fase " + faseAtual.numero + "/5", W - 154, 59);
+
+            if (pausado) {
+              ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
+              ctx.fillRect(0, 0, W, H);
+              ctx.fillStyle = "#ffffff";
+              ctx.font = "bold 26px sans-serif";
+              ctx.textAlign = "center";
+              ctx.fillText("PAUSADO", W / 2, H / 2 - 6);
+              ctx.font = "14px sans-serif";
+              ctx.fillStyle = "#cfd8dc";
+              ctx.fillText("Toque em Continuar ou aperte P", W / 2, H / 2 + 22);
+              ctx.textAlign = "left";
+            }
+          }
+
+          ctx.restore();
+          requestAnimationFrame(loop);
         }
-      }
 
-      ctx.restore();
-      requestAnimationFrame(loop);
-    }
+        focarCanvas();
+        requestAnimationFrame(loop);
+        </script>
+        </body>
+        </html>
+        """
 
-    focarCanvas();
-    requestAnimationFrame(loop);
-    </script>
-    </body>
-    </html>
-    """
+        html_jogo = (
+            html_template
+            .replace("__ASSETS_URI__", json.dumps(assets_uri))
+            .replace("__NOME_JOGADOR__", json.dumps(nome_seguro))
+            .replace("__MODO_JOGO__", json.dumps(modo_codigo))
+        )
 
-    html_jogo = (
-        html_template
-        .replace("__ASSETS_URI__", json.dumps(assets_uri))
-        .replace("__NOME_JOGADOR__", json.dumps(nome_seguro))
-        .replace("__GH_TOKEN__", json.dumps(GITHUB_TOKEN))
-        .replace("__GH_REPO__", json.dumps(GITHUB_REPO))
+        if hasattr(st, "iframe"):
+            st.iframe(html_jogo, height=535)
+        else:
+            import streamlit.components.v1 as components
+            components.html(html_jogo, height=535, scrolling=False)
+
+    # ==========================================================================
+    # COLUNA DIREITA: TOP 5 OFICIAL
+    # ==========================================================================
+    with col_ranking:
+        st.markdown('<div class="ranking-card">', unsafe_allow_html=True)
+        r_top1, r_top2 = st.columns([1.6, 1])
+        with r_top1:
+            st.subheader("🏆 Top 5 Oficial")
+        with r_top2:
+            if st.button("🔄 Atualizar", use_container_width=True):
+                st.rerun()
+
+        if "flash_podio" in st.session_state:
+            ok_flash, msg_flash = st.session_state.pop("flash_podio")
+            if ok_flash:
+                st.success(msg_flash)
+            else:
+                st.error(msg_flash)
+
+        dados_gh, _, erro_gh = ler_ranking_github()
+        if dados_gh is not None:
+            st.caption("🔒 Salvamento seguro no servidor • Top 5 sem duplicados.")
+        else:
+            st.warning(f"⚠️ Modo offline: {erro_gh}")
+
+        ranking_atual = dados_gh if dados_gh is not None else []
+        nomes_modos = {"campanha": "Campanha", "infinito": "Infinito", "tempo": "60s"}
+
+        if not ranking_atual:
+            st.info("Nenhuma partida finalizada ainda. Jogue para inaugurar o Top 5!")
+        else:
+            medalhas = ["🥇", "🥈", "🥉"]
+            for idx, item in enumerate(ranking_atual[:5]):
+                pos = medalhas[idx] if idx < 3 else f"#{idx + 1}"
+                fase_item = item.get("fase", 1)
+                modo_item = nomes_modos.get(item.get("modo", "campanha"), "Campanha")
+                cor_fundo = (
+                    "rgba(255, 215, 0, 0.16)"
+                    if idx == 0
+                    else "rgba(255, 255, 255, 0.05)"
+                )
+                st.markdown(
+                    f"""
+                    <div style="
+                        display:flex;
+                        justify-content:space-between;
+                        align-items:center;
+                        background:{cor_fundo};
+                        padding:10px 14px;
+                        border-radius:10px;
+                        margin-bottom:8px;
+                        border: 1px solid rgba(255,255,255,0.08);
+                    ">
+                        <div>
+                            <b>{pos} {item['nome']}</b><br/>
+                            <small style="color:#a5d6a7;">{modo_item} · Fase {fase_item}/5 • {item['data']}</small>
+                        </div>
+                        <span style="font-weight:bold; color:#ffe082; font-size:1.05rem;">{item['pontos']} pts</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ==============================================================================
+# ABA 2: ENCICLOPÉDIA "APRENDA JOGANDO"
+# ==============================================================================
+with aba_guia:
+    st.subheader("📚 Guia Oficial da Coleta Seletiva & Mecânicas Especiais")
+    st.write("Consulte o destino correto de cada resíduo, seu tempo de decomposição na natureza e os bônus do jogo.")
+
+    st.markdown("### 1. Materiais Recicláveis e Orgânicos")
+    st.table(
+        [
+            {"Ícone": "🔵 1 · Papel", "Exemplos no Jogo": "Jornal, folhas, caixa de papelão limpa", "Decomposição na Natureza": "3 a 6 meses", "Observação": "Deve estar seco e sem gordura."},
+            {"Ícone": "🔴 2 · Plástico", "Exemplos no Jogo": "Garrafa PET (+2 pts se cheia!), copo descartável", "Decomposição na Natureza": "Mais de 400 anos", "Observação": "Amasse garrafas para reduzir volume."},
+            {"Ícone": "🟢 3 · Vidro", "Exemplos no Jogo": "Garrafas e potes de conserva", "Decomposição na Natureza": "Indeterminado (+4.000 anos)", "Observação": "100% reciclável infinitas vezes."},
+            {"Ícone": "🟡 4 · Metal", "Exemplos no Jogo": "Latas de alumínio e aço", "Decomposição na Natureza": "100 a 500 anos", "Observação": "Reciclar alumínio economiza 95% de energia."},
+            {"Ícone": "🟤 5 · Orgânico", "Exemplos no Jogo": "Maçã, casca de banana, 🍕 Caixa de Pizza com gordura", "Decomposição na Natureza": "2 semanas a 1 ano", "Observação": "Vira adubo rico via compostagem."},
+        ]
     )
 
-    if hasattr(st, "iframe"):
-        st.iframe(html_jogo, height=495)
-    else:
-        import streamlit.components.v1 as components
-        components.html(html_jogo, height=495, scrolling=False)
-
-with col_ranking:
-    st.markdown('<div class="ranking-card">', unsafe_allow_html=True)
-    r_top1, r_top2 = st.columns([1.6, 1])
-    with r_top1:
-        st.subheader("🏆 Top 5 Oficial")
-    with r_top2:
-        if st.button("🔄 Atualizar", use_container_width=True):
-            st.rerun()
-
-    dados_gh, _, erro_gh = ler_ranking_github()
-    if dados_gh is not None:
-        st.caption("✅ Conectado ao GitHub • Exibe os 5 melhores jogadores.")
-    else:
-        st.warning(f"⚠️ Modo local: {erro_gh}")
-
-    ranking_atual = dados_gh if dados_gh is not None else []
-
-    if not ranking_atual:
-        st.info("Nenhuma partida finalizada ainda. Jogue para inaugurar o Top 5!")
-    else:
-        medalhas = ["🥇", "🥈", "🥉"]
-        for idx, item in enumerate(ranking_atual[:5]):
-            pos = medalhas[idx] if idx < 3 else f"#{idx + 1}"
-            fase_item = item.get("fase", 1)
-            cor_fundo = (
-                "rgba(255, 215, 0, 0.16)"
-                if idx == 0
-                else "rgba(255, 255, 255, 0.05)"
-            )
-            st.markdown(
-                f"""
-                <div style="
-                    display:flex;
-                    justify-content:space-between;
-                    align-items:center;
-                    background:{cor_fundo};
-                    padding:10px 14px;
-                    border-radius:10px;
-                    margin-bottom:8px;
-                    border: 1px solid rgba(255,255,255,0.08);
-                ">
-                    <div>
-                        <b>{pos} {item['nome']}</b><br/>
-                        <small style="color:#a5d6a7;">Fase {fase_item}/5 • {item['data']}</small>
-                    </div>
-                    <span style="font-weight:bold; color:#ffe082; font-size:1.05rem;">{item['pontos']} pts</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    st.markdown("</div>", unsafe_allow_html=True)
+    c_arm, c_pwr = st.columns(2)
+    with c_arm:
+        st.markdown("### 2. Pegadinhas e Armadilhas")
+        st.markdown(
+            """
+            * **🍕 Caixa de Pizza Engordurada:** Apesar de ser feita de papelão, a gordura contamina a reciclagem do papel. Jogue na lixeira **Marrom (Orgânico)** para ganhar **+2 pts**.
+            * **🔋 Pilha Tóxica (Perigo!):** Metais pesados contaminam o solo. **Desvie dela!** Se cair na lixeira comum, tira **2 vidas** (ou 5s) e congela sua lixeira por 2 segundos.
+            * **🛍️ Saco de Reciclagem:** Ao coletar, abre no ar e espalha **3 itens** do mesmo material.
+            """
+        )
+    with c_pwr:
+        st.markdown("### 3. Power-Ups Coletáveis")
+        st.markdown(
+            """
+            * **🧲 Ímã Seletivo (5s):** Atrai automaticamente os lixos da cor selecionada.
+            * **⏳ Eco-Freeze (6s):** Reduz a velocidade de queda pela metade.
+            * **🛡️ Escudo Ambiental:** Absorve o próximo erro ou pilha tóxica sem perder vida.
+            * **✨ Coringa:** Converte todos os lixos da tela para a cor da lixeira atual.
+            * **❤️ Kit de Restauração:** Recupera +1 vida (aparece quando você tem $\le 2$ vidas).
+            """
+        )
