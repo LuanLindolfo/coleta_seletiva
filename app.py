@@ -24,7 +24,7 @@ GITHUB_FILE_PATH = "ranking.json"
 
 
 def ler_ranking_github():
-    """Lê o ranking.json da API do GitHub. Retorna (lista, sha, erro_str)."""
+    """Lê o ranking.json da API do GitHub e retorna os 5 melhores. Retorna (lista, sha, erro_str)."""
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return None, None, "GITHUB_TOKEN ou GITHUB_REPO não configurados nos Secrets."
 
@@ -43,7 +43,17 @@ def ler_ranking_github():
             payload = json.loads(resp.read().decode("utf-8"))
             conteudo_decodificado = base64.b64decode(payload["content"]).decode("utf-8")
             dados = json.loads(conteudo_decodificado)
-            return sorted(dados, key=lambda x: (-int(x.get("pontos", 0)), x.get("data", ""))), payload["sha"], None
+            if not isinstance(dados, list):
+                dados = []
+            ordenados = sorted(
+                dados,
+                key=lambda x: (
+                    -int(x.get("pontos", 0)),
+                    -int(x.get("fase", 1)),
+                    x.get("data", ""),
+                ),
+            )
+            return ordenados[:5], payload["sha"], None
     except urllib.error.HTTPError as e:
         detalhe = e.read().decode("utf-8", errors="ignore")
         if e.code == 404:
@@ -331,7 +341,7 @@ with col_jogo:
     <div class="game-wrapper">
       <canvas id="game" width="480" height="360" tabindex="0"></canvas>
 
-      <div id="banner-status-podio">⏳ Salvando no pódio...</div>
+      <div id="banner-status-podio">⏳ Salvando no Top 5...</div>
 
       <div class="lixeiras-touch">
         <button type="button" class="btn-lixeira b1 ativa" data-tipo="1">1·Papel</button>
@@ -362,11 +372,79 @@ with col_jogo:
     const bannerPodio = document.getElementById("banner-status-podio");
 
     const W = 480, H = 360;
+    const META_VITORIA = 40;
     const URIS = __ASSETS_URI__;
-    const STORAGE_KEY = "coleta_seletiva_recorde_v2";
+    const STORAGE_KEY = "coleta_seletiva_recorde_v3";
     const NOME_JOGADOR = __NOME_JOGADOR__;
     const GH_TOKEN = __GH_TOKEN__;
     const GH_REPO = __GH_REPO__;
+
+    // Configuração das 5 Fases (todos os 10 itens de lixo caem desde a Fase 1)
+    const FASES_CONFIG = [
+      {
+        numero: 1,
+        nome: "Aquecimento",
+        descricao: "Todos os tipos de lixo • Ritmo inicial",
+        minPts: 0,
+        velBase: 2.0,
+        spawnMin: 1450,
+        spawnMax: 2100,
+        ventoAmp: 0,
+        maxSimultaneos: 2
+      },
+      {
+        numero: 2,
+        nome: "Ritmo Urbano",
+        descricao: "Queda mais rápida!",
+        minPts: 5,
+        velBase: 2.5,
+        spawnMin: 1150,
+        spawnMax: 1750,
+        ventoAmp: 0,
+        maxSimultaneos: 3
+      },
+      {
+        numero: 3,
+        nome: "Fluxo Intenso",
+        descricao: "Mais resíduos caindo juntos!",
+        minPts: 12,
+        velBase: 2.9,
+        spawnMin: 850,
+        spawnMax: 1350,
+        ventoAmp: 0,
+        maxSimultaneos: 4
+      },
+      {
+        numero: 4,
+        nome: "Rajadas de Vento",
+        descricao: "Cuidado com o balanço no ar!",
+        minPts: 20,
+        velBase: 3.2,
+        spawnMin: 800,
+        spawnMax: 1250,
+        ventoAmp: 1.4,
+        maxSimultaneos: 4
+      },
+      {
+        numero: 5,
+        nome: "Desafio Máximo",
+        descricao: "Velocidade alta + vento forte!",
+        minPts: 30,
+        velBase: 3.7,
+        spawnMin: 680,
+        spawnMax: 1050,
+        ventoAmp: 2.1,
+        maxSimultaneos: 5
+      }
+    ];
+
+    function obterConfigFase(pts) {
+      let atual = FASES_CONFIG[0];
+      for (const f of FASES_CONFIG) {
+        if (pts >= f.minPts) atual = f;
+      }
+      return atual;
+    }
 
     function focarCanvas() {
       canvas.focus();
@@ -388,7 +466,6 @@ with col_jogo:
       } catch (e) {}
     }
 
-    // Encode UTF-8 para Base64
     function utf8ToB64(str) {
       const bytes = new TextEncoder().encode(str);
       let binString = "";
@@ -407,13 +484,15 @@ with col_jogo:
       return new TextDecoder().decode(bytes);
     }
 
-    // Gravação automática direta no GitHub via fetch (funciona 100% dentro do iframe!)
-    async function registrarAutomaticamenteNoGitHub(ptsFinal) {
-      const pts = Math.max(0, Math.min(20, ptsFinal));
+    // Gravação automática mantendo apenas o TOP 5 no ranking.json
+    async function registrarAutomaticamenteNoGitHub(ptsFinal, faseFinal) {
+      const pts = Math.max(0, Math.min(META_VITORIA, ptsFinal));
+      const faseAlcancada = Math.max(1, Math.min(5, faseFinal));
+
       bannerPodio.style.display = "block";
       bannerPodio.style.borderColor = "#ffb300";
       bannerPodio.style.color = "#ffe082";
-      bannerPodio.textContent = "⏳ Salvando " + pts + " pts no Pódio...";
+      bannerPodio.textContent = "⏳ Salvando " + pts + " pts (Fase " + faseAlcancada + ") no Top 5...";
 
       if (!GH_TOKEN || !GH_REPO) {
         bannerPodio.style.borderColor = "#ff5252";
@@ -451,15 +530,21 @@ with col_jogo:
         listaAtual.push({
           nome: NOME_JOGADOR,
           pontos: pts,
+          fase: faseAlcancada,
           data: dia + "/" + mes + " " + hora + ":" + min
         });
 
-        listaAtual.sort((a, b) => Number(b.pontos) - Number(a.pontos));
-        const top15 = listaAtual.slice(0, 15);
+        // Ordena por pontos (desc), fase (desc) e mantém estritamente os 5 melhores
+        listaAtual.sort((a, b) => {
+          const diffPts = Number(b.pontos || 0) - Number(a.pontos || 0);
+          if (diffPts !== 0) return diffPts;
+          return Number(b.fase || 1) - Number(a.fase || 1);
+        });
+        const top5 = listaAtual.slice(0, 5);
 
         const bodyPut = {
-          message: "chore: registra " + pts + " pts de " + NOME_JOGADOR,
-          content: utf8ToB64(JSON.stringify(top15, null, 2))
+          message: "chore: atualiza Top 5 (" + NOME_JOGADOR + " - " + pts + " pts)",
+          content: utf8ToB64(JSON.stringify(top5, null, 2))
         };
         if (shaAtual) bodyPut.sha = shaAtual;
 
@@ -472,7 +557,7 @@ with col_jogo:
         if (respPut.ok) {
           bannerPodio.style.borderColor = "#69f0ae";
           bannerPodio.style.color = "#69f0ae";
-          bannerPodio.textContent = "✅ " + pts + " pts salvos! Clique em Atualizar Pódio →";
+          bannerPodio.textContent = "✅ " + pts + " pts registrados! Clique em Atualizar →";
         } else {
           const errTxt = await respPut.text();
           bannerPodio.style.borderColor = "#ff5252";
@@ -563,8 +648,11 @@ with col_jogo:
     let pontos = 0;
     let recorde = lerRecorde();
     let vidas = 5;
-    let velocidade = 2.1;
+    let faseAtual = FASES_CONFIG[0];
+    let velocidade = faseAtual.velBase;
     let ultimoTipo = 1;
+
+    let bannerFase = null; // { texto, subtitulo, ate }
 
     let lixeiraX = 0;
     let lixeiraY = -135;
@@ -647,6 +735,7 @@ with col_jogo:
         proximoSpawn += delta;
         if (dicaVisivel) dicaAte += delta;
         if (flashErroAte > 0) flashErroAte += delta;
+        if (bannerFase) bannerFase.ate += delta;
         for (const fb of feedbacks) fb.criadoEm += delta;
         pausado = false;
       }
@@ -662,6 +751,27 @@ with col_jogo:
         recorde = pontos;
         salvarRecorde(recorde);
       }
+
+      const novaFase = obterConfigFase(pontos);
+      if (novaFase.numero > faseAtual.numero && pontos < META_VITORIA) {
+        faseAtual = novaFase;
+        velocidade = faseAtual.velBase;
+        clones = []; // Limpa a tela para transição justa
+        const agora = performance.now();
+        proximoSpawn = agora + 1500;
+
+        let msgVida = "";
+        if (vidas < 5) {
+          vidas += 1;
+          msgVida = " • +1 ❤️ Bônus!";
+        }
+
+        bannerFase = {
+          texto: "✨ FASE " + faseAtual.numero + ": " + faseAtual.nome.toUpperCase() + " ✨",
+          subtitulo: faseAtual.descricao + msgVida,
+          ate: agora + 2200
+        };
+      }
     }
 
     function iniciarPartida() {
@@ -672,7 +782,8 @@ with col_jogo:
       atualizarBotaoPausar();
       pontos = 0;
       vidas = 5;
-      velocidade = 2.1;
+      faseAtual = FASES_CONFIG[0];
+      velocidade = faseAtual.velBase;
       ultimoTipo = 1;
       lixeiraX = 0;
       lixeiraY = -135;
@@ -683,7 +794,12 @@ with col_jogo:
       feedbacks = [];
       flashErroAte = 0;
       ultimoAumentoVel = agora;
-      proximoSpawn = agora + 1300;
+      proximoSpawn = agora + 1100;
+      bannerFase = {
+        texto: "FASE 1: " + faseAtual.nome.toUpperCase(),
+        subtitulo: faseAtual.descricao,
+        ate: agora + 1800
+      };
     }
 
     btnIniciarTop.addEventListener("click", () => {
@@ -743,26 +859,32 @@ with col_jogo:
       const tempoRef = pausado ? pausadoEm : agora;
 
       if (estado === "jogo" && !pausado) {
-        if (agora - ultimoAumentoVel >= 7000) {
-          velocidade += 0.25;
+        if (agora - ultimoAumentoVel >= 6500) {
+          velocidade += 0.15;
           ultimoAumentoVel = agora;
         }
 
-        if (teclas["ArrowLeft"] || teclas["KeyA"]) lixeiraX -= 7.5;
-        if (teclas["ArrowRight"] || teclas["KeyD"]) lixeiraX += 7.5;
+        if (teclas["ArrowLeft"] || teclas["KeyA"]) lixeiraX -= 7.8;
+        if (teclas["ArrowRight"] || teclas["KeyD"]) lixeiraX += 7.8;
         if (lixeiraX > 205) lixeiraX = 205;
         if (lixeiraX < -205) lixeiraX = -205;
 
-        if (agora >= proximoSpawn) {
+        // Todos os 10 itens (tipos 1 a 5) sorteados desde a Fase 1
+        if (agora >= proximoSpawn && clones.length < faseAtual.maxSimultaneos) {
           const item = Math.floor(Math.random() * 10) + 1;
           const tipo = ((item - 1) % 5) + 1;
+          // Itens leves (1=Papel, 2=Plástico) sofrem mais vento nas fases 4 e 5
+          const fatorPeso = (tipo === 1 || tipo === 2) ? 1.35 : 0.75;
           clones.push({
-            x: Math.floor(Math.random() * 401) - 200,
+            x: Math.floor(Math.random() * 381) - 190,
             y: 175,
             item,
-            tipo
+            tipo,
+            faseOnda: Math.random() * Math.PI * 2,
+            fatorPeso
           });
-          proximoSpawn = agora + (1350 + Math.random() * 950);
+          const intervalo = faseAtual.spawnMin + Math.random() * (faseAtual.spawnMax - faseAtual.spawnMin);
+          proximoSpawn = agora + intervalo;
         }
 
         const imgL = imgs.lixeira[lixeiraFantasia - 1];
@@ -774,6 +896,12 @@ with col_jogo:
         const restantes = [];
         for (const c of clones) {
           c.y -= velocidade;
+
+          if (faseAtual.ventoAmp > 0) {
+            c.x += Math.sin((agora * 0.004) + c.faseOnda) * faseAtual.ventoAmp * c.fatorPeso;
+            c.x = Math.max(-205, Math.min(205, c.x));
+          }
+
           const imgC = imgs.lixo[c.item - 1];
           const cw = (imgC && imgC.naturalWidth) || 50;
           const ch = (imgC && imgC.naturalHeight) || 50;
@@ -801,6 +929,7 @@ with col_jogo:
         clones = restantes;
 
         if (dicaVisivel && agora >= dicaAte) dicaVisivel = false;
+        if (bannerFase && agora >= bannerFase.ate) bannerFase = null;
 
         if (vidas < 1) {
           estado = "fim";
@@ -810,8 +939,8 @@ with col_jogo:
           dicaVisivel = false;
           clones = [];
           playSound(sons.fim);
-          registrarAutomaticamenteNoGitHub(pontos);
-        } else if (pontos > 19) {
+          registrarAutomaticamenteNoGitHub(pontos, faseAtual.numero);
+        } else if (pontos >= META_VITORIA) {
           estado = "vitoria";
           pausado = false;
           atualizarBotaoPausar();
@@ -819,7 +948,7 @@ with col_jogo:
           dicaVisivel = false;
           clones = [];
           playSound(sons.vitoria);
-          registrarAutomaticamenteNoGitHub(pontos);
+          registrarAutomaticamenteNoGitHub(pontos, faseAtual.numero);
         }
       }
 
@@ -856,11 +985,11 @@ with col_jogo:
           ctx.drawImage(imgs.botao, bx, by, bw, bh);
         }
         ctx.fillStyle = "rgba(15, 25, 18, 0.88)";
-        roundRect(W - 155, 8, 147, 28, 8);
+        roundRect(W - 165, 8, 157, 28, 8);
         ctx.fill();
         ctx.fillStyle = "#ffe082";
         ctx.font = "bold 13px sans-serif";
-        ctx.fillText("🏆 Recorde: " + recorde + " / 20", W - 146, 27);
+        ctx.fillText("🏆 Recorde: " + recorde + " / " + META_VITORIA, W - 156, 27);
       } else if (estado === "jogo") {
         if (lixeiraVisivel) {
           const imgL = imgs.lixeira[lixeiraFantasia - 1];
@@ -898,6 +1027,26 @@ with col_jogo:
           }
         }
 
+        if (bannerFase && tempoRef < bannerFase.ate) {
+          ctx.save();
+          ctx.fillStyle = "rgba(12, 28, 18, 0.90)";
+          roundRect(W / 2 - 190, H / 2 - 42, 380, 68, 12);
+          ctx.fill();
+          ctx.strokeStyle = "#81c784";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#ffe082";
+          ctx.font = "bold 16px sans-serif";
+          ctx.fillText(bannerFase.texto, W / 2, H / 2 - 14);
+
+          ctx.fillStyle = "#c8e6c9";
+          ctx.font = "13px sans-serif";
+          ctx.fillText(bannerFase.subtitulo, W / 2, H / 2 + 10);
+          ctx.restore();
+        }
+
         const proxFeedbacks = [];
         for (const fb of feedbacks) {
           const elapsed = tempoRef - fb.criadoEm;
@@ -916,22 +1065,28 @@ with col_jogo:
         }
         feedbacks = proxFeedbacks;
 
+        // HUD Superior
         ctx.fillStyle = "rgba(15, 25, 18, 0.88)";
-        roundRect(8, 8, 140, 28, 8);
+        roundRect(8, 8, 148, 28, 8);
         ctx.fill();
-        roundRect(8, 40, 140, 28, 8);
+        roundRect(8, 40, 148, 28, 8);
         ctx.fill();
-        roundRect(W - 148, 8, 140, 28, 8);
+        roundRect(W - 156, 8, 148, 28, 8);
+        ctx.fill();
+        roundRect(W - 156, 40, 148, 28, 8);
         ctx.fill();
 
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 14px sans-serif";
-        ctx.fillText("♻️ Pontos: " + pontos + "/20", 16, 27);
+        ctx.fillText("♻️ Pontos: " + pontos + "/" + META_VITORIA, 16, 27);
         ctx.fillText("❤️ Vidas: " + vidas, 16, 59);
 
         ctx.fillStyle = "#ffe082";
         ctx.font = "bold 13px sans-serif";
-        ctx.fillText("🏆 Recorde: " + recorde, W - 140, 27);
+        ctx.fillText("🏆 Recorde: " + recorde, W - 148, 27);
+
+        ctx.fillStyle = "#81c784";
+        ctx.fillText("🚩 Fase " + faseAtual.numero + "/5", W - 148, 59);
 
         if (pausado) {
           ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
@@ -976,25 +1131,26 @@ with col_ranking:
     st.markdown('<div class="ranking-card">', unsafe_allow_html=True)
     r_top1, r_top2 = st.columns([1.6, 1])
     with r_top1:
-        st.subheader("🏆 Pódio Oficial")
+        st.subheader("🏆 Top 5 Oficial")
     with r_top2:
         if st.button("🔄 Atualizar", use_container_width=True):
             st.rerun()
 
     dados_gh, _, erro_gh = ler_ranking_github()
     if dados_gh is not None:
-        st.caption("✅ Conectado ao GitHub • Salvamento automático ao fim da partida.")
+        st.caption("✅ Conectado ao GitHub • Exibe os 5 melhores jogadores.")
     else:
         st.warning(f"⚠️ Modo local: {erro_gh}")
 
     ranking_atual = dados_gh if dados_gh is not None else []
 
     if not ranking_atual:
-        st.info("Nenhuma partida finalizada ainda. Jogue para inaugurar o pódio!")
+        st.info("Nenhuma partida finalizada ainda. Jogue para inaugurar o Top 5!")
     else:
         medalhas = ["🥇", "🥈", "🥉"]
-        for idx, item in enumerate(ranking_atual[:10]):
+        for idx, item in enumerate(ranking_atual[:5]):
             pos = medalhas[idx] if idx < 3 else f"#{idx + 1}"
+            fase_item = item.get("fase", 1)
             cor_fundo = (
                 "rgba(255, 215, 0, 0.16)"
                 if idx == 0
@@ -1012,7 +1168,10 @@ with col_ranking:
                     margin-bottom:8px;
                     border: 1px solid rgba(255,255,255,0.08);
                 ">
-                    <span><b>{pos} {item['nome']}</b> <small style="color:#a5d6a7;">({item['data']})</small></span>
+                    <div>
+                        <b>{pos} {item['nome']}</b><br/>
+                        <small style="color:#a5d6a7;">Fase {fase_item}/5 • {item['data']}</small>
+                    </div>
                     <span style="font-weight:bold; color:#ffe082; font-size:1.05rem;">{item['pontos']} pts</span>
                 </div>
                 """,
