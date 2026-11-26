@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validar e Ordenar Top 5 (ranking.json)
+      - name: Validar, Deduplicar e Ordenar Top 5 (ranking.json)
         run: |
           python3 -c '
           import json
@@ -26,30 +26,43 @@ jobs:
           if not isinstance(dados, list):
               dados = []
 
+          modos_validos = {"campanha", "infinito", "tempo"}
           validos = []
           for d in dados:
               pts = int(d.get("pontos", -1))
               fase = int(d.get("fase", 1))
+              modo = str(d.get("modo", "campanha"))
+              if modo not in modos_validos:
+                  modo = "campanha"
+              limite = 40 if modo == "campanha" else 999
               nome = str(d.get("nome", "Jogador")).strip()[:20] or "Jogador"
               data = str(d.get("data", ""))
 
-              if 0 <= pts <= 40 and 1 <= fase <= 5:
+              if 0 <= pts <= limite and 1 <= fase <= 5:
                   validos.append({
                       "nome": nome,
                       "pontos": pts,
                       "fase": fase,
+                      "modo": modo,
                       "data": data
                   })
 
-          # Ordena por pontos (maior), fase (maior) e data (mais antiga primeiro no empate)
           validos.sort(key=lambda x: (-x["pontos"], -x["fase"], x["data"]))
 
+          unicos = []
+          nomes_vistos = set()
+          for item in validos:
+              chave_nome = item["nome"].lower()
+              if chave_nome not in nomes_vistos:
+                  nomes_vistos.add(chave_nome)
+                  unicos.append(item)
+
           with open("ranking.json", "w", encoding="utf-8") as f:
-              json.dump(validos[:5], f, ensure_ascii=False, indent=2)
+              json.dump(unicos[:5], f, ensure_ascii=False, indent=2)
           '
 
       - name: Commit se houve reordenação ou limpeza
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git diff --quiet ranking.json || (git add ranking.json && git commit -m "chore: valida e ordena Top 5 oficial" && git push)
+          git diff --quiet ranking.json || (git add ranking.json && git commit -m "chore: valida e ordena Top 5 único" && git push)
