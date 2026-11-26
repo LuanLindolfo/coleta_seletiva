@@ -70,7 +70,6 @@ def salvar_pontuacao_github(nome: str, pontos: int, fase: int, modo: str):
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return False, "Secrets do GitHub não configurados."
 
-    # Validação de integridade no servidor
     modos_validos = {"campanha", "infinito", "tempo"}
     if modo not in modos_validos:
         modo = "campanha"
@@ -103,7 +102,6 @@ def salvar_pontuacao_github(nome: str, pontos: int, fase: int, modo: str):
         )
     )
 
-    # Deduplicação: mantém apenas o maior recorde de cada jogador
     unicos = []
     vistos = set()
     for item in dados_atuais:
@@ -235,7 +233,7 @@ c4.markdown('<div class="bin-card" style="background:#f9a825; color:#1b1b1b;">4 
 c5.markdown('<div class="bin-card" style="background:#5d4037;">5 · ORGÂNICO</div>', unsafe_allow_html=True)
 
 # ==============================================================================
-# CARREGAMENTO DE ASSETS EM BASE64
+# CARREGAMENTO DE ASSETS EM BASE64 (INCLUINDO AS NOVAS IMAGENS .PNG)
 # ==============================================================================
 arquivos_em_falta = []
 
@@ -248,6 +246,8 @@ def asset_to_data_uri(nome_arquivo):
     mime, _ = mimetypes.guess_type(caminho)
     if nome_arquivo.lower().endswith(".svg"):
         mime = "image/svg+xml"
+    elif nome_arquivo.lower().endswith(".png"):
+        mime = "image/png"
     elif nome_arquivo.lower().endswith(".wav"):
         mime = "audio/wav"
     elif not mime:
@@ -296,6 +296,15 @@ assets_uri = {
         asset_to_data_uri("7f683ab17ac6b7aac94b7af86074fbaa.svg"),
         asset_to_data_uri("a7b7b55ac7696e64f8dfcd5102922329.svg"),
     ],
+    # Novas imagens dos itens e power-ups
+    "extras": {
+        "coringa": asset_to_data_uri("coringa.png"),
+        "vida": asset_to_data_uri("kit_restauracao.png"),
+        "ima": asset_to_data_uri("ima_seletivo.png"),
+        "escudo": asset_to_data_uri("escudo_ambiental.png"),
+        "freeze": asset_to_data_uri("eco_freeze.png"),
+        "pizza": asset_to_data_uri("caixa_pizza_realista.png"),
+    },
     "som_acerto": asset_to_data_uri("cfc50a412483f6aadb83adeff596052e.wav"),
     "som_erro": asset_to_data_uri("768bd6a764ab62a6a6764e4147c3e615.wav"),
     "som_fim": asset_to_data_uri("e3635ab50a93193e53cd16f047446add.wav"),
@@ -342,7 +351,6 @@ with aba_jogar:
             else ("infinito" if "Infinito" in modo_label else "tempo")
         )
 
-        # HTML5 Canvas Game Engine (Zero tokens expostos!)
         html_template = """
         <!DOCTYPE html>
         <html>
@@ -530,7 +538,7 @@ with aba_jogar:
         const META_CAMPANHA = 40;
         const URIS = __ASSETS_URI__;
         const NOME_JOGADOR = __NOME_JOGADOR__;
-        const MODO_JOGO = __MODO_JOGO__; // "campanha" | "infinito" | "tempo"
+        const MODO_JOGO = __MODO_JOGO__;
         const STORAGE_KEY = "coleta_seletiva_recorde_v4_" + MODO_JOGO;
         const BADGES_KEY = "coleta_seletiva_badges_v1";
 
@@ -555,7 +563,6 @@ with aba_jogar:
           10: "Casca de Banana"
         };
 
-        // 5 Fases Progressivas (Todos os 10 itens base caem desde a Fase 1!)
         const FASES_CONFIG = [
           { numero: 1, nome: "Aquecimento", desc: "Todos os materiais • Ritmo inicial", minPts: 0, velBase: 2.0, spawnMin: 1400, spawnMax: 2050, ventoAmp: 0, maxSim: 2 },
           { numero: 2, nome: "Ritmo Urbano", desc: "Queda mais rápida + Itens especiais!", minPts: 5, velBase: 2.45, spawnMin: 1150, spawnMax: 1700, ventoAmp: 0, maxSim: 3 },
@@ -636,7 +643,6 @@ with aba_jogar:
           } catch (e) {}
         }
 
-        // Envio seguro ao Python do Streamlit via navegação do frame pai (Zero token no cliente!)
         function enviarPlacarSeguroParaPython(ptsFinal, faseFinal) {
           const pts = Math.max(0, Math.round(ptsFinal));
           const faseAlcancada = Math.max(1, Math.min(5, faseFinal));
@@ -702,6 +708,14 @@ with aba_jogar:
           lixeira: URIS.lixeira.map(loadImg),
           lixo: URIS.lixo.map(loadImg),
           dica: URIS.dica.map(loadImg),
+          extras: {
+            coringa: loadImg(URIS.extras.coringa),
+            vida: loadImg(URIS.extras.vida),
+            ima: loadImg(URIS.extras.ima),
+            escudo: loadImg(URIS.extras.escudo),
+            freeze: loadImg(URIS.extras.freeze),
+            pizza: loadImg(URIS.extras.pizza),
+          }
         };
 
         const sons = {
@@ -732,7 +746,6 @@ with aba_jogar:
           ctx.closePath();
         }
 
-        // Estado do Jogo
         let estado = "instrucoes";
         let pausado = false;
         let pausadoEm = 0;
@@ -747,19 +760,17 @@ with aba_jogar:
         let velocidade = faseAtual.velBase;
         let ultimoTipo = 1;
 
-        // Combos e Estatísticas da Partida
         let comboAtual = 0;
         let errosNaPartida = 0;
         let acertosVidro = 0;
 
-        // Efeitos de Power-Ups & Armadilhas
         let imaAte = 0;
         let freezeAte = 0;
         let escudoAtivo = false;
         let congeladoAte = 0;
 
         let bannerFase = null;
-        let cartaoEdu = null; // { texto, cor, ate }
+        let cartaoEdu = null;
 
         let lixeiraX = 0;
         let lixeiraY = -135;
@@ -899,7 +910,6 @@ with aba_jogar:
           adicionarFeedback(px, py, txtFlutuante, mult > 1 ? "#ffd54f" : "#69f0ae");
           playSound(sons.acerto);
 
-          // Verifica evolução de fase
           const novaFase = obterConfigFase(pontos);
           if (novaFase.numero > faseAtual.numero) {
             if (faseAtual.numero === 4) desbloquearBadge("sobrevivente");
@@ -929,7 +939,6 @@ with aba_jogar:
         function dispararErro(tipoCorreto, px = W / 2, py = H / 2, motivoEdu = null) {
           const agora = performance.now();
 
-          // Escudo Ambiental absorve 1 erro!
           if (escudoAtivo) {
             escudoAtivo = false;
             adicionarFeedback(px, py, "🛡️ Escudo Bloqueou!", "#4fc3f7");
@@ -969,32 +978,32 @@ with aba_jogar:
           const x = Math.floor(Math.random() * 380) - 190;
           const faseOnda = Math.random() * Math.PI * 2;
 
-          // 1) Power-ups (11% de chance)
-          if (r < 0.11) {
+          // 1) Power-ups (12% de chance)
+          if (r < 0.12) {
             const poolPwr = ["ima", "freeze", "escudo", "coringa"];
             if (MODO_JOGO !== "tempo" && vidas <= 2) {
-              poolPwr.push("vida", "vida"); // Maior chance se estiver com pouca vida
+              poolPwr.push("vida", "vida");
             }
             const pwr = poolPwr[Math.floor(Math.random() * poolPwr.length)];
             return { x, y: 175, kind: "powerup", subtipo: pwr, tipo: 0, faseOnda, fatorPeso: 0.6 };
           }
 
           // 2) Armadilha: Pilha Tóxica / Bomba (a partir de 3 pts, 9% de chance)
-          if (pontos >= 3 && r < 0.20) {
+          if (pontos >= 3 && r < 0.21) {
             return { x, y: 175, kind: "bomba", subtipo: "pilha", tipo: 0, faseOnda, fatorPeso: 0.7 };
           }
 
           // 3) Itens Especiais / Compostos / Saco Combo (18% de chance)
-          if (r < 0.38) {
+          if (r < 0.39) {
             const subR = Math.random();
-            if (subR < 0.40) {
-              // Caixa de pizza engordurada -> Vai no Orgânico (tipo 5)!
+            if (subR < 0.42) {
+              // Caixa de pizza engordurada -> Orgânico (tipo 5)
               return { x, y: 175, kind: "especial", subtipo: "pizza", tipo: 5, faseOnda, fatorPeso: 1.2 };
-            } else if (subR < 0.75) {
-              // Garrafa PET cheia -> Vale +2 pts no Plástico (tipo 2)!
+            } else if (subR < 0.76) {
+              // Garrafa PET cheia -> Plástico (tipo 2)
               return { x, y: 175, kind: "especial", subtipo: "pet_cheia", tipo: 2, faseOnda, fatorPeso: 0.85 };
             } else {
-              // Saco de Reciclagem -> Abre no ar espalhando 3 itens!
+              // Saco de Reciclagem
               const tipoSaco = Math.floor(Math.random() * 5) + 1;
               return { x, y: 175, kind: "saco", subtipo: "saco", tipo: tipoSaco, faseOnda, fatorPeso: 0.9 };
             }
@@ -1009,8 +1018,8 @@ with aba_jogar:
 
         function abrirSacoNoAr(saco) {
           playSound(sons.acerto);
-          const [sx, sy] = scratchToCanvas(saco.x, saco.y, 44, 44);
-          adicionarFeedback(sx + 22, sy, "🛍️ +3 Itens!", "#81c784");
+          const [sx, sy] = scratchToCanvas(saco.x, saco.y, 48, 48);
+          adicionarFeedback(sx + 24, sy, "🛍️ +3 Itens!", "#81c784");
           const offsets = [-55, 0, 55];
           for (let i = 0; i < 3; i++) {
             const itemDoTipo = saco.tipo + (Math.random() < 0.5 ? 0 : 5);
@@ -1036,7 +1045,7 @@ with aba_jogar:
             mostrarCartaoEducativo("🧲 Ímã ativo! Atraindo lixos da cor selecionada.", "#64b5f6", 2000);
           } else if (subtipo === "freeze") {
             freezeAte = agora + 6000;
-            adicionarFeedback(px, py, "⏳ Câmera Lenta (6s)!", "#80deea");
+            adicionarFeedback(px, py, "⏳ Eco-Freeze (6s)!", "#80deea");
             mostrarCartaoEducativo("⏳ Eco-Freeze! Velocidade reduzida pela metade.", "#80deea", 2000);
           } else if (subtipo === "escudo") {
             escudoAtivo = true;
@@ -1145,18 +1154,36 @@ with aba_jogar:
           return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
         }
 
-        // Desenho procedural dos novos itens especiais, armadilhas e power-ups
+        // Desenha suas novas imagens PNG (coringa, kit_restauracao, ima_seletivo, escudo_ambiental, eco_freeze, caixa_pizza_realista)
         function desenharEntidadeCustom(c, cx, cy, cw, ch) {
           ctx.save();
           const centroX = cx + cw / 2;
           const centroY = cy + ch / 2;
-          const raio = cw * 0.44;
+          const raio = cw * 0.48;
 
+          // Verifica se existe uma imagem PNG dedicada para este item/power-up
+          const imgExtra = imgs.extras[c.subtipo];
+          if (imagemPronta(imgExtra)) {
+            if (c.kind === "powerup") {
+              // Halo luminoso suave para destacar power-ups no cenário
+              ctx.beginPath();
+              ctx.arc(centroX, centroY, raio + 2, 0, Math.PI * 2);
+              ctx.fillStyle = "rgba(64, 196, 255, 0.25)";
+              ctx.fill();
+              ctx.lineWidth = 1.5;
+              ctx.strokeStyle = "rgba(128, 222, 234, 0.85)";
+              ctx.stroke();
+            }
+            ctx.drawImage(imgExtra, cx, cy, cw, ch);
+            ctx.restore();
+            return;
+          }
+
+          // Fallback gráfico para itens sem arquivo PNG próprio (pilha, garrafa cheia, saco)
           if (c.kind === "bomba") {
-            // Pilha Tóxica / Bomba
             ctx.fillStyle = "#212121";
             ctx.beginPath();
-            ctx.arc(centroX, centroY, raio, 0, Math.PI * 2);
+            ctx.arc(centroX, centroY, raio * 0.9, 0, Math.PI * 2);
             ctx.fill();
             ctx.lineWidth = 2.5;
             ctx.strokeStyle = "#ff1744";
@@ -1168,7 +1195,7 @@ with aba_jogar:
           } else if (c.kind === "especial") {
             ctx.fillStyle = c.subtipo === "pizza" ? "#4e342e" : "#b71c1c";
             ctx.beginPath();
-            ctx.arc(centroX, centroY, raio, 0, Math.PI * 2);
+            ctx.arc(centroX, centroY, raio * 0.9, 0, Math.PI * 2);
             ctx.fill();
             ctx.lineWidth = 2;
             ctx.strokeStyle = "#ffe082";
@@ -1181,7 +1208,7 @@ with aba_jogar:
             const coresTipo = { 1: "#1565c0", 2: "#c62828", 3: "#2e7d32", 4: "#f9a825", 5: "#5d4037" };
             ctx.fillStyle = coresTipo[c.tipo] || "#37474f";
             ctx.beginPath();
-            ctx.arc(centroX, centroY, raio, 0, Math.PI * 2);
+            ctx.arc(centroX, centroY, raio * 0.9, 0, Math.PI * 2);
             ctx.fill();
             ctx.lineWidth = 2.5;
             ctx.strokeStyle = "#ffffff";
@@ -1193,7 +1220,7 @@ with aba_jogar:
           } else if (c.kind === "powerup") {
             ctx.fillStyle = "rgba(13, 71, 161, 0.9)";
             ctx.beginPath();
-            ctx.arc(centroX, centroY, raio, 0, Math.PI * 2);
+            ctx.arc(centroX, centroY, raio * 0.9, 0, Math.PI * 2);
             ctx.fill();
             ctx.lineWidth = 2.5;
             ctx.strokeStyle = "#40c4ff";
@@ -1228,7 +1255,6 @@ with aba_jogar:
           const tempoRef = pausado ? pausadoEm : agora;
 
           if (estado === "jogo" && !pausado) {
-            // Cronômetro no modo Contra o Relógio
             if (MODO_JOGO === "tempo") {
               const dt = (agora - ultimoTickTempo) / 1000;
               tempoRestante = Math.max(0, tempoRestante - dt);
@@ -1238,13 +1264,11 @@ with aba_jogar:
               }
             }
 
-            // Aceleração contínua no Modo Infinito ou gradual nas fases
             if (agora - ultimoAumentoVel >= 6500) {
               velocidade += MODO_JOGO === "infinito" ? 0.22 : 0.14;
               ultimoAumentoVel = agora;
             }
 
-            // Movimento da lixeira (bloqueado se congelada por pilha tóxica)
             const estaCongelado = agora < congeladoAte;
             if (!estaCongelado) {
               if (teclas["ArrowLeft"] || teclas["KeyA"]) lixeiraX -= 7.8;
@@ -1253,7 +1277,6 @@ with aba_jogar:
               if (lixeiraX < -205) lixeiraX = -205;
             }
 
-            // Spawn de itens
             if (agora >= proximoSpawn && clones.length < faseAtual.maxSim) {
               clones.push(gerarEntidadeSpawn());
               const intervalo = faseAtual.spawnMin + Math.random() * (faseAtual.spawnMax - faseAtual.spawnMin);
@@ -1273,19 +1296,17 @@ with aba_jogar:
             for (const c of clones) {
               c.y -= velEfetiva;
 
-              // Vento nas fases 4 e 5
               if (faseAtual.ventoAmp > 0) {
                 c.x += Math.sin((agora * 0.004) + c.faseOnda) * faseAtual.ventoAmp * c.fatorPeso;
               }
 
-              // Ímã Seletivo: puxa itens compatíveis com a lixeira atual
               if (imaAtivo && (c.kind === "base" || c.kind === "especial") && c.tipo === lixeiraFantasia) {
                 c.x += (lixeiraX - c.x) * 0.07;
               }
 
               c.x = Math.max(-205, Math.min(205, c.x));
 
-              let cw = 46, ch = 46;
+              let cw = 52, ch = 52;
               if (c.kind === "base") {
                 const imgC = imgs.lixo[c.item - 1];
                 cw = (imgC && imgC.naturalWidth) || 50;
@@ -1301,7 +1322,6 @@ with aba_jogar:
                 if (c.kind === "powerup") {
                   aplicarPowerUp(c.subtipo, px, py);
                 } else if (c.kind === "bomba") {
-                  // Pilha tóxica na lixeira comum = dano + congelamento!
                   if (escudoAtivo) {
                     escudoAtivo = false;
                     adicionarFeedback(px, py, "🛡️ Pilha Bloqueada!", "#4fc3f7");
@@ -1338,7 +1358,6 @@ with aba_jogar:
                     dispararErro(c.tipo, px, py, msgPizza);
                   }
                 } else {
-                  // Item base (1 a 10)
                   if (lixeiraFantasia === c.tipo) {
                     registrarAcerto(1, c.tipo, px, py);
                   } else {
@@ -1354,7 +1373,6 @@ with aba_jogar:
                 continue;
               }
 
-              // Item passou do fundo da tela
               if (c.y < -170) {
                 if (c.kind === "base" || c.kind === "especial") {
                   const nomeItem = c.kind === "especial"
@@ -1367,7 +1385,6 @@ with aba_jogar:
                     "⚠️ Caiu no chão! " + nomeItem + " → " + NOMES_LIXEIRAS[c.tipo]
                   );
                 }
-                // Bombas, sacos e power-ups que caem no chão apenas somem sem penalidade
                 continue;
               }
 
@@ -1428,7 +1445,6 @@ with aba_jogar:
             ctx.font = "bold 13px sans-serif";
             ctx.fillText("🏆 Recorde: " + recorde + " pts", W - 160, 27);
           } else if (estado === "jogo") {
-            // Aura visual na lixeira (Escudo, Ímã, Congelado ou Combo)
             if (lixeiraVisivel) {
               const imgL = imgs.lixeira[lixeiraFantasia - 1];
               const lw = (imgL && imgL.naturalWidth) || 80;
@@ -1467,7 +1483,6 @@ with aba_jogar:
               }
             }
 
-            // Desenho dos itens em queda
             for (const c of clones) {
               if (c.kind === "base") {
                 const imgC = imgs.lixo[c.item - 1];
@@ -1481,8 +1496,8 @@ with aba_jogar:
                   ctx.fillRect(cx, cy, cw, ch);
                 }
               } else {
-                const [cx, cy] = scratchToCanvas(c.x, c.y, 46, 46);
-                desenharEntidadeCustom(c, cx, cy, 46, 46);
+                const [cx, cy] = scratchToCanvas(c.x, c.y, 52, 52);
+                desenharEntidadeCustom(c, cx, cy, 52, 52);
               }
             }
 
@@ -1496,7 +1511,6 @@ with aba_jogar:
               }
             }
 
-            // Cartão Educativo Instantâneo
             if (cartaoEdu && tempoRef < cartaoEdu.ate) {
               ctx.save();
               ctx.fillStyle = "rgba(10, 22, 14, 0.92)";
@@ -1512,7 +1526,6 @@ with aba_jogar:
               ctx.restore();
             }
 
-            // Banner de Transição de Fase
             if (bannerFase && tempoRef < bannerFase.ate) {
               ctx.save();
               ctx.fillStyle = "rgba(12, 28, 18, 0.92)";
@@ -1533,7 +1546,6 @@ with aba_jogar:
               ctx.restore();
             }
 
-            // Feedbacks Flutuantes
             const proxFeedbacks = [];
             for (const fb of feedbacks) {
               const elapsed = tempoRef - fb.criadoEm;
